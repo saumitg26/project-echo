@@ -1,0 +1,10 @@
+{
+  "description": "Explore family memories, lost Earth archives, and historical mysteries in an immersive digital vault, preserving stories for future generations.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
