@@ -273,6 +273,52 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
     durationSeconds: number
   } | null>(null)
 
+  const [transcript, setTranscript] = useState<string | null>(null)
+  const [transcriptionError, setTranscriptionError] = useState('')
+  const [transcribing, setTranscribing] = useState(false)
+
+  const clearTranscript = () => {
+    setTranscript(null)
+    setTranscriptionError('')
+  }
+
+  const transcribeRecording = async () => {
+    if (!file || type !== 'audio' || saving || transcribing) return
+    setTranscriptionError('')
+    if (file.size > 2_000_000) {
+      setTranscriptionError('Transcription accepts audio clips up to 2 MB.')
+      return
+    }
+    if (!supabase) {
+      setTranscriptionError('Open the configured Preview and sign in to transcribe audio.')
+      return
+    }
+
+    setTranscribing(true)
+    try {
+      const { data, error } = await supabase.auth.getSession()
+      if (error || !data.session) throw new Error('Sign in to transcribe audio.')
+
+      const form = new FormData()
+      form.set('file', file)
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${data.session.access_token}` },
+        body: form,
+        signal: AbortSignal.timeout(45_000),
+      })
+      const result = await response.json().catch(() => null)
+      if (!response.ok || typeof result?.text !== 'string') {
+        throw new Error(typeof result?.error === 'string' ? result.error : 'Transcription is unavailable. Try again.')
+      }
+      setTranscript(result.text)
+    } catch (cause) {
+      setTranscriptionError(cause instanceof Error ? cause.message : 'Transcription failed.')
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
   const saveRecording = async (recording: RecordingResult) => {
     setError('')
     if (recording.sizeBytes > 2_000_000) {
@@ -288,6 +334,7 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
       )
 
       const nextPreview = persistent ? URL.createObjectURL(audioFile) : await blobToDataUrl(audioFile)
+      clearTranscript()
       setFile(audioFile)
       setPreview(nextPreview)
       setRecMeta({
@@ -300,6 +347,7 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
   }
   const chooseFile = (next: File | null) => {
     setError('')
+    clearTranscript()
     setFile(next)
     setPreview('')
     setRecMeta(null)
@@ -317,6 +365,7 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
   }
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
+    if (saving || transcribing) return
     if (!title.trim() || !description.trim()) return setError('Add both a title and a description.')
     if ((persistent || type !== 'letter') && (!file || !preview)) return setError(`Choose a ${type} file before saving.`)
     setSaving(true); setError('')
@@ -333,11 +382,11 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
       <p className="local-note"><b>{persistent ? 'PRIVATE SUPABASE ARCHIVE' : 'DEMO MODE'}</b> {persistent ? 'Files are encrypted in transit and stored in a private family path.' : 'Files are saved in this browser only. Sign in to preserve them across devices.'}</p>
       <div className="form-grid">
         <label>FAMILY MEMBER<select value={personId} onChange={(e) => setPersonId(e.target.value)}>{members.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <label>MEDIA TYPE<select value={type} onChange={(e) => { setType(e.target.value as MemoryType); setFile(null); setPreview(''); setRecMeta(null); setError('') }}><option value="image">Photograph</option><option value="audio">Audio</option><option value="video">Video</option>{persistent && <option value="document">PDF document</option>}{!persistent && <option value="letter">Written record</option>}</select></label>
+        <label>MEDIA TYPE<select disabled={saving || transcribing} value={type} onChange={(e) => { clearTranscript(); setType(e.target.value as MemoryType); setFile(null); setPreview(''); setRecMeta(null); setError('') }}><option value="image">Photograph</option><option value="audio">Audio</option><option value="video">Video</option>{persistent && <option value="document">PDF document</option>}{!persistent && <option value="letter">Written record</option>}</select></label>
       </div>
       <label>MEMORY TITLE<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={70} placeholder="e.g. The last summer rain" /></label>
       <label>DESCRIPTION<textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="What should future generations know?" /></label>
-      {type !== 'letter' && <label className="file-field"><input type="file" accept={type === 'document' ? 'application/pdf' : `${type}/*`} onChange={(e) => chooseFile(e.target.files?.[0] || null)} /><span><Icon name="upload" /><b>{file ? file.name : `CHOOSE ${type.toUpperCase()} FILE`}</b><small>Maximum {persistent ? '50 MB · private cloud storage' : '2 MB · stored only on this device'}</small></span></label>}
+      {type !== 'letter' && <label className="file-field"><input type="file" disabled={saving || transcribing} accept={type === 'document' ? 'application/pdf' : `${type}/*`} onChange={(e) => chooseFile(e.target.files?.[0] || null)} /><span><Icon name="upload" /><b>{file ? file.name : `CHOOSE ${type.toUpperCase()} FILE`}</b><small>Maximum {persistent ? '50 MB · private cloud storage' : '2 MB · stored only on this device'}</small></span></label>}
       {preview && type === 'image' && <img className="upload-preview" src={preview} alt="Selected file preview" />}
       {type === 'audio' && !file && (
         <>
@@ -352,10 +401,23 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
       {type === 'audio' && preview && (
         <>
           <audio className="upload-media" src={preview} controls />
+          <button type="button" className="text-button" disabled={saving || transcribing} onClick={transcribeRecording}>
+            {transcribing ? 'Uploading and transcribing…' : transcriptionError ? 'Retry transcription' : 'Transcribe'}
+          </button>
+          {transcribing && <p role="status">Sending audio to ElevenLabs…</p>}
+          {transcriptionError && <p className="form-error" role="alert">{transcriptionError}</p>}
+          {transcript !== null && (
+            <label>
+              Transcript ready · review and edit
+              <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} />
+            </label>
+          )}
           <button
             type="button"
             className="text-button"
+            disabled={saving || transcribing}
             onClick={() => {
+              clearTranscript()
               setFile(null)
               setPreview('')
               setRecMeta(null)
@@ -368,7 +430,7 @@ function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
       )}
       {preview && type === 'video' && <video className="upload-media" src={preview} controls />}
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary wide" type="submit" disabled={saving}>{saving ? 'PRESERVING MEMORY…' : 'PRESERVE MEMORY'} <Icon name="archive" /></button>
+      <button className="primary wide" type="submit" disabled={saving || transcribing}>{saving ? 'PRESERVING MEMORY…' : 'PRESERVE MEMORY'} <Icon name="archive" /></button>
     </form>}
   </Modal>
 }
