@@ -84,6 +84,18 @@ export async function getAncestorRelationships(familyId: string): Promise<Ancest
     'Fetch relationships');
 }
 
+export interface CreateAncestorInput {
+  familyId: string; name: string; birthYear?: number; deathYear?: number;
+  biography?: string; generation?: number;
+}
+export async function createAncestor(input: CreateAncestorInput): Promise<AncestorRow> {
+  return check(
+    await requireSupabase().from('ancestors').insert({
+      family_id: input.familyId, name: input.name, birth_year: input.birthYear,
+      death_year: input.deathYear, biography: input.biography, generation: input.generation,
+    }).select().single(), 'Create ancestor');
+}
+
 // ---------- Memories ----------
 export async function getMemoriesForAncestor(ancestorId: string): Promise<MemoryRow[]> {
   return check(
@@ -105,9 +117,24 @@ export async function createMemory(input: CreateMemoryInput): Promise<MemoryRow>
     }).select().single(), 'Create memory');
 }
 
+
+export async function deleteMemory(memoryId: string): Promise<void> {
+  check(await requireSupabase().from('memories').delete().eq('id', memoryId).select('id'), 'Delete memory');
+}
+
 // ---------- Media (private bucket + signed URLs) ----------
-function safeExtension(file: File): string {
+function safeExtension(file: Blob): string {
   return ALLOWED_MIME_TYPES[file.type] ?? '';
+}
+
+export interface AudioUploadContract {
+  blob: Blob;
+  mimeType: 'audio/mpeg' | 'audio/mp4' | 'audio/wav' | 'audio/webm' | 'audio/ogg';
+  durationSeconds: number;
+  transcript?: string;
+  ancestorId: string;
+  memoryId: string;
+  uploadStatus: 'pending' | 'uploading' | 'complete' | 'failed';
 }
 
 /**
@@ -115,7 +142,7 @@ function safeExtension(file: File): string {
  * If the DB insert fails the uploaded object is removed so storage and DB stay consistent.
  */
 export async function uploadMemoryMedia(params: {
-  familyId: string; memoryId: string; file: File;
+  familyId: string; memoryId: string; file: File | Blob;
 }): Promise<MediaAssetRow> {
   const { familyId, memoryId, file } = params;
   if (!(file.type in ALLOWED_MIME_TYPES)) throw new Error(`Unsupported file type: ${file.type || 'unknown'}`);
@@ -123,20 +150,47 @@ export async function uploadMemoryMedia(params: {
 
   const sb = requireSupabase();
   const userId = await requireUserId();
-  const path = `families/${familyId}/memories/${memoryId}/${crypto.randomUUID()}.${safeExtension(file)}`;
+  const extension = safeExtension(file);
+  const uniqueId = crypto.randomUUID();
+  const path = `families/${familyId}/memories/${memoryId}/${uniqueId}.${extension}`;
+  const originalFilename = file instanceof File ? file.name : `recording-${uniqueId}.${extension}`;
 
   const up = await sb.storage.from(MEDIA_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
   if (up.error) throw new Error(`Upload failed: ${up.error.message}`);
 
   const res = await sb.from('media_assets').insert({
     memory_id: memoryId, family_id: familyId, storage_path: path, mime_type: file.type,
-    file_size_bytes: file.size, original_filename: file.name.slice(0, 255), uploaded_by: userId,
+    file_size_bytes: file.size, original_filename: originalFilename.slice(0, 255), uploaded_by: userId,
   }).select().single();
   if (res.error) {
     await sb.storage.from(MEDIA_BUCKET).remove([path]);
     throw new Error(`Saving media record failed: ${res.error.message}`);
   }
   return res.data;
+}
+
+/**
+ * Creates the metadata row and uploads its file as one UI operation. Supabase Storage and Postgres
+ * cannot share a transaction, so a failed upload is compensated by deleting the new memory row.
+ */
+export async function createMemoryWithMedia(
+  input: CreateMemoryInput,
+  file: File,
+): Promise<{ memory: MemoryRow; media: MediaAssetRow }> {
+  const memory = await createMemory(input);
+  try {
+    const media = await uploadMemoryMedia({ familyId: input.familyId, memoryId: memory.id, file });
+    return { memory, media };
+  } catch (error) {
+    try {
+      await deleteMemory(memory.id);
+    } catch (cleanupError) {
+      const reason = error instanceof Error ? error.message : 'Unknown upload error';
+      const cleanup = cleanupError instanceof Error ? cleanupError.message : 'unknown cleanup error';
+      throw new Error(`${reason} The incomplete memory could not be removed (${cleanup}).`);
+    }
+    throw error;
+  }
 }
 
 export async function getMediaForMemory(memoryId: string): Promise<MediaAssetRow[]> {

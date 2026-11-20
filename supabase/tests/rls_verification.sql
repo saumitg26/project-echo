@@ -8,9 +8,11 @@ begin;
 insert into auth.users (id, email) values
   ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'a@test.invalid'),
   ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'b@test.invalid');
-insert into public.families (id, name, is_demo) values ('de000000-0000-4000-8000-000000000001', 'DEMO', true);
+insert into public.families (id, name, is_demo) values ('de000000-0000-4000-8000-0000000000ff', 'RLS TEST DEMO', true);
 insert into public.ancestors (id, family_id, name) values
-  ('de000000-0000-4000-8000-0000000000a1', 'de000000-0000-4000-8000-000000000001', 'Demo Ancestor');
+  ('de000000-0000-4000-8000-000000000aff', 'de000000-0000-4000-8000-0000000000ff', 'RLS Test Demo Ancestor');
+insert into public.time_capsules (family_id, message, unlock_date) values
+  ('de000000-0000-4000-8000-0000000000ff', 'RLS test locked demo capsule', current_date + 30);
 
 -- ===== User A: creates a family, ancestor, memory, media row, storage object =====
 select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
@@ -23,6 +25,9 @@ insert into public.ancestors (id, family_id, name, generation)
 insert into public.memories (id, family_id, ancestor_id, title, uploaded_by) values
   ('ee000000-0000-4000-8000-000000000001', 'fa000000-0000-4000-8000-000000000001',
    'ac000000-0000-4000-8000-000000000001', 'Memory A', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+insert into public.time_capsules (family_id, creator_id, message, unlock_date) values
+  ('fa000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+   'Locked private capsule', current_date + 30);
 insert into storage.objects (bucket_id, name) values ('memory-media',
   'families/fa000000-0000-4000-8000-000000000001/memories/ee000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg');
 insert into public.media_assets (memory_id, family_id, storage_path, mime_type, file_size_bytes, original_filename, uploaded_by)
@@ -45,6 +50,9 @@ do $$ declare n int; r text; begin
   select count(*) into n from storage.objects where bucket_id = 'memory-media';
   if n <> 1 then raise exception 'FAIL: A cannot read own storage object'; end if;
   raise notice 'PASS: A can create + read own family, ancestor, memory, media row, storage object';
+  select count(*) into n from public.time_capsules where family_id = 'fa000000-0000-4000-8000-000000000001';
+  if n <> 1 then raise exception 'FAIL: capsule creator cannot read own locked capsule'; end if;
+  raise notice 'PASS: capsule creator can read own locked capsule';
 end $$;
 
 do $$ declare ok boolean := false; begin
@@ -57,6 +65,12 @@ do $$ declare ok boolean := false; begin
   exception when others then ok := true; end;
   if not ok then raise exception 'FAIL: malformed storage path accepted'; end if;
   raise notice 'PASS: malformed storage path rejected';
+  ok := false;
+  begin insert into storage.objects (bucket_id, name) values ('memory-media',
+    'families/fa000000-0000-4000-8000-000000000001/memories/ee000000-0000-4000-8000-999999999999/44444444-4444-4444-8444-444444444444.jpg');
+  exception when others then ok := true; end;
+  if not ok then raise exception 'FAIL: upload into nonexistent memory folder accepted'; end if;
+  raise notice 'PASS: nonexistent memory folder rejected';
   ok := false;
   begin insert into public.media_assets (memory_id, family_id, storage_path, mime_type, file_size_bytes, original_filename, uploaded_by)
     values ('ee000000-0000-4000-8000-000000000001', 'fa000000-0000-4000-8000-000000000001',
@@ -122,6 +136,9 @@ do $$ declare n int; ok boolean := false; begin
   select count(*) into n from storage.objects where bucket_id = 'memory-media';
   if n <> 1 then raise exception 'FAIL: viewer cannot read media'; end if;
   raise notice 'PASS: viewer can read family memories and media';
+  select count(*) into n from public.time_capsules where family_id = 'fa000000-0000-4000-8000-000000000001';
+  if n <> 0 then raise exception 'FAIL: viewer read a locked time capsule'; end if;
+  raise notice 'PASS: viewer cannot read a locked time capsule';
   begin insert into public.memories (family_id, ancestor_id, title, uploaded_by) values
     ('fa000000-0000-4000-8000-000000000001', 'ac000000-0000-4000-8000-000000000001', 'x', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
   exception when others then ok := true; end;
@@ -143,13 +160,16 @@ reset role;
 -- ===== anon: no private data, demo only =====
 set local role anon;
 do $$ declare n int; ok boolean := false; begin
-  select count(*) into n from public.families where is_demo = false;
+  select count(*) into n from public.families where id = 'fa000000-0000-4000-8000-000000000001';
   if n <> 0 then raise exception 'FAIL: anon sees private families'; end if;
-  select count(*) into n from public.memories;
+  select count(*) into n from public.memories where family_id = 'fa000000-0000-4000-8000-000000000001';
   if n <> 0 then raise exception 'FAIL: anon sees private memories'; end if;
-  select count(*) into n from public.ancestors;
-  if n <> 1 then raise exception 'FAIL: anon should see only the 1 demo ancestor (got %)', n; end if;
-  raise notice 'PASS: anon sees only fictional demo data';
+  select count(*) into n from public.ancestors where id = 'de000000-0000-4000-8000-000000000aff';
+  if n <> 1 then raise exception 'FAIL: anon cannot see the fictional test ancestor'; end if;
+  raise notice 'PASS: anon can see fictional demo data but not private rows';
+  select count(*) into n from public.time_capsules where family_id = 'de000000-0000-4000-8000-0000000000ff';
+  if n <> 0 then raise exception 'FAIL: anon sees a locked demo capsule'; end if;
+  raise notice 'PASS: anon cannot read a locked demo capsule';
   begin insert into public.families (name, is_demo) values ('x', true);
   exception when others then ok := true; end;
   if not ok then raise exception 'FAIL: anon inserted a family'; end if;

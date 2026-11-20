@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
+import {
+  createAncestor, createFamily, createMemoryWithMedia, getAncestors, getCurrentUser,
+  getMediaWithSignedUrls, getMemoriesForAncestor, getMyFamilies, signInWithEmail,
+  signOut, signUpWithEmail, type FamilyWithRole,
+} from './lib/supabase/api'
+import { isSupabaseConfigured, supabase } from './lib/supabase/client'
 
 type Screen = 'vault' | 'family' | 'room' | 'earth' | 'echoes' | 'reconstruction' | 'capsule'
 type IconName = 'arrow' | 'archive' | 'audio' | 'camera' | 'close' | 'earth' | 'family' | 'letter' | 'menu' | 'pause' | 'play' | 'plus' | 'record' | 'spark' | 'upload'
-type MemoryType = 'image' | 'audio' | 'video' | 'letter'
+type MemoryType = 'image' | 'audio' | 'video' | 'letter' | 'document'
 type StoredMemory = { id: string; personId: string; title: string; description: string; type: MemoryType; fileName?: string; dataUrl?: string; createdAt: string; tags: string[] }
 type StoredCapsule = { id: string; message: string; recipient: string; unlockYear: number; attachmentName?: string; attachmentUrl?: string; createdAt: string }
+type FamilyMember = { id: string; name: string; years: string; gen: string; memories: number; x: number; y: number; image?: string; biography?: string }
+type UploadDraft = { personId: string; title: string; description: string; type: MemoryType; preview?: string }
 
 const oceanImage = 'https://images.unsplash.com/photo-1747182922993-9c7dde01c97f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=85&w=1600'
 const cityImage = 'https://images.unsplash.com/photo-1653207771914-f7d37303755c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=85&w=1600'
@@ -138,14 +147,13 @@ function Vault({ go }: { go: (s: Screen) => void }) {
   )
 }
 
-const family = [
+const family: FamilyMember[] = [
   { id: 'elena', name: 'Elena Voss', years: '2008—2071', gen: 'GEN I · MARA’S MOTHER', memories: 18, x: 50, y: 19, image: oldPhotosImage },
   { id: 'mara', name: 'Mara Voss', years: '2038—2080', gen: 'GEN II · LIA’S MOTHER', memories: 12, x: 34, y: 51, image: portraitImage },
   { id: 'jonas', name: 'Jonas Vale', years: '2035—2076', gen: 'GEN II · MARA’S PARTNER', memories: 7, x: 66, y: 51, image: oceanImage },
   { id: 'lia', name: 'Lia Vale', years: '2062—', gen: 'GEN III · YOU', memories: 5, x: 50, y: 82, image: undefined },
 ]
-type FamilyMember = typeof family[number]
-const reconstructedRoomIds = new Set<FamilyMember['id']>(['mara'])
+const reconstructedRoomIds = new Set<string>(['mara'])
 
 const seededMemories: StoredMemory[] = [
   { id: 'seed-elena-photo', personId: 'elena', title: 'The afternoon before', description: 'A family photograph taken on the first warm day of 2041.', type: 'image', dataUrl: portraitImage, createdAt: '2041-04-18', tags: ['family', 'boston', '2041'] },
@@ -159,21 +167,26 @@ function Breadcrumbs({ items }: { items: { label: string; action?: () => void }[
   return <nav className="breadcrumbs" aria-label="Breadcrumb">{items.map((item, index) => <span key={item.label}>{index > 0 && <i>/</i>}{item.action ? <button onClick={item.action}>{item.label}</button> : <b>{item.label}</b>}</span>)}</nav>
 }
 
-function Family({ go, enterMemory, selected, setSelected, memories, addMemory }: { go: (s: Screen) => void; enterMemory: (ancestorId: string) => void; selected: FamilyMember; setSelected: (p: FamilyMember) => void; memories: StoredMemory[]; addMemory: (m: StoredMemory) => void }) {
+function Family({ go, enterMemory, selected, setSelected, memories, members, archiveName, isPrivate, onAccount, onSaveMemory }: {
+  go: (s: Screen) => void; enterMemory: (ancestorId: string) => void; selected: FamilyMember;
+  setSelected: (p: FamilyMember) => void; memories: StoredMemory[]; members: FamilyMember[];
+  archiveName: string; isPrivate: boolean; onAccount: () => void;
+  onSaveMemory: (draft: UploadDraft, file: File | null) => Promise<StoredMemory>;
+}) {
   const [upload, setUpload] = useState(false)
   const selectedMemories = memories.filter((memory) => memory.personId === selected.id)
   return (
     <section className="inner-screen family-screen">
       <Breadcrumbs items={[{ label: 'Memory Vault', action: () => go('vault') }, { label: 'Family Legacy' }]} />
       <div className="section-heading">
-        <div><Kicker>BLOODLINE ARCHIVE · VOSS / VALE</Kicker><h2>Family <em>Constellation</em></h2><p>Three generations. Forty-two fragments of a world your family once knew.</p></div>
-        <button className="secondary" onClick={() => setUpload(true)}><Icon name="upload" /> UPLOAD MEMORY</button>
+        <div><Kicker>BLOODLINE ARCHIVE · {archiveName.toUpperCase()}</Kicker><h2>Family <em>Constellation</em></h2><p>{isPrivate ? 'Your private family archive, secured by Supabase.' : 'Three generations. Forty-two fragments of a world your family once knew.'}</p></div>
+        <div className="archive-actions"><button className="secondary" onClick={onAccount}><Icon name="family" /> {isPrivate ? 'SWITCH ARCHIVE' : 'SIGN IN'}</button><button className="secondary" onClick={() => setUpload(true)} disabled={members.length === 0}><Icon name="upload" /> UPLOAD MEMORY</button></div>
       </div>
       <div className="constellation">
         <svg className="connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           <path d="M50 19 C50 35 38 38 34 51M34 51 L66 51M50 51 C50 66 50 70 50 82" />
         </svg>
-        {family.map((person) => (
+        {members.map((person) => (
           <button key={person.id} className={`person-node ${selected.id === person.id ? 'selected' : ''}`} style={{ left: `${person.x}%`, top: `${person.y}%` }} onClick={() => setSelected(person)} aria-label={`Select ${person.name}, ${person.memories} memories`}>
             <span className="node-orbit" /><span className="node-image">{person.image ? <img src={person.image} alt="" /> : <Icon name="spark" />}</span>
             <span className="node-label"><b>{person.name}</b><small>{person.gen}</small></span>
@@ -185,11 +198,11 @@ function Family({ go, enterMemory, selected, setSelected, memories, addMemory }:
         <div className="card-image"><img src={selected.image || oceanImage} alt={`Example archive portrait for ${selected.name}`} /><span>ARCHIVAL EXAMPLE</span></div>
         <Kicker>SELECTED ANCESTOR</Kicker>
         <h3>{selected.name}</h3><p className="years">{selected.years}</p>
-        <p>{selected.id === 'elena' ? 'Botanist, mother, keeper of forbidden seeds. Elena recorded the last rainfall above Shelter 12.' : selected.id === 'mara' ? 'Your mother at twenty: sketching the harbor from the kitchen window, saving songs on worn tape, and writing letters she never sent.' : 'A branch of your family story, preserved through images, sound, and written testimony.'}</p>
+        <p>{selected.biography || (selected.id === 'elena' ? 'Botanist, mother, keeper of forbidden seeds. Elena recorded the last rainfall above Shelter 12.' : selected.id === 'mara' ? 'Your mother at twenty: sketching the harbor from the kitchen window, saving songs on worn tape, and writing letters she never sent.' : 'A branch of your family story, preserved through images, sound, and written testimony.')}</p>
         {selected.id === 'mara' && <blockquote className="ancestor-quote">“If you ever forget the color of morning, I left it here for you.”<span>— Mara, field tape 04</span></blockquote>}
-        <div className="memory-stats"><span><b>{selected.memories + selectedMemories.filter((m) => !m.id.startsWith('seed-')).length}</b> MEMORIES</span><span><b>{new Set(selectedMemories.map((m) => m.type)).size || 1}</b> MEDIA TYPES</span></div>
+        <div className="memory-stats"><span><b>{isPrivate ? selectedMemories.length : selected.memories + selectedMemories.filter((m) => !m.id.startsWith('seed-')).length}</b> MEMORIES</span><span><b>{new Set(selectedMemories.map((m) => m.type)).size || 1}</b> MEDIA TYPES</span></div>
         <div className="memory-strip" aria-label={`${selected.name}'s available memories`}>
-          {selectedMemories.slice(-3).map((memory) => <button key={memory.id} onClick={() => reconstructedRoomIds.has(selected.id) && enterMemory(selected.id)} disabled={!reconstructedRoomIds.has(selected.id)} title={reconstructedRoomIds.has(selected.id) ? `Enter ${memory.title}` : `${memory.title} is preserved; immersive room not yet reconstructed`}>
+          {selectedMemories.slice(-3).map((memory) => <button key={memory.id} onClick={() => isPrivate && memory.dataUrl ? window.open(memory.dataUrl, '_blank', 'noopener,noreferrer') : reconstructedRoomIds.has(selected.id) && enterMemory(selected.id)} disabled={!isPrivate && !reconstructedRoomIds.has(selected.id)} title={isPrivate ? `Open private file for ${memory.title}` : reconstructedRoomIds.has(selected.id) ? `Enter ${memory.title}` : `${memory.title} is preserved; immersive room not yet reconstructed`}>
             {memory.type === 'image' && memory.dataUrl ? <img src={memory.dataUrl} alt="" /> : <Icon name={memory.type === 'audio' ? 'audio' : memory.type === 'letter' ? 'letter' : 'archive'} />}
             <span>{memory.title}</span>
           </button>)}
@@ -199,12 +212,15 @@ function Family({ go, enterMemory, selected, setSelected, memories, addMemory }:
           ? <button className={`primary wide enter-memory ${selected.id === 'mara' ? 'featured' : ''}`} onClick={() => enterMemory(selected.id)}><span><small>STEP BEYOND THE ARCHIVE</small>ENTER {selected.name.split(' ')[0].toUpperCase()}'S MEMORY</span> <Icon name="arrow" /></button>
           : <div className="room-unavailable-note"><button className="secondary wide" disabled><Icon name="archive" /> MEMORY ROOM NOT YET RECONSTRUCTED</button><p>{selected.name}’s memories are preserved in the archive, but an immersive reconstruction is not yet available.</p></div>}
       </aside>
-      {upload && <UploadMemory initialPerson={selected.id} onClose={() => setUpload(false)} onSave={(memory) => { addMemory(memory); setSelected(family.find((p) => p.id === memory.personId) || selected) }} />}
+      {upload && <UploadMemory initialPerson={selected.id} members={members} persistent={isPrivate} onClose={() => setUpload(false)} onSave={async (draft, file) => { const memory = await onSaveMemory(draft, file); setSelected(members.find((p) => p.id === memory.personId) || selected); return memory }} />}
     </section>
   )
 }
 
-function UploadMemory({ initialPerson, onClose, onSave }: { initialPerson: string; onClose: () => void; onSave: (m: StoredMemory) => void }) {
+function UploadMemory({ initialPerson, members, persistent, onClose, onSave }: {
+  initialPerson: string; members: FamilyMember[]; persistent: boolean; onClose: () => void;
+  onSave: (draft: UploadDraft, file: File | null) => Promise<StoredMemory>;
+}) {
   const [personId, setPersonId] = useState(initialPerson)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -213,41 +229,91 @@ function UploadMemory({ initialPerson, onClose, onSave }: { initialPerson: strin
   const [preview, setPreview] = useState('')
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => () => { if (preview.startsWith('blob:')) URL.revokeObjectURL(preview) }, [preview])
   const chooseFile = (next: File | null) => {
     setError(''); setFile(next); setPreview('')
     if (!next) return
-    if (next.size > 2_000_000) { setError('This local prototype accepts files up to 2 MB to protect browser storage.'); setFile(null); return }
-    const allowed = type === 'image' ? next.type.startsWith('image/') : type === 'audio' ? next.type.startsWith('audio/') : next.type.startsWith('video/')
+    const maxBytes = persistent ? 50 * 1024 * 1024 : 2_000_000
+    if (next.size > maxBytes) { setError(`Files may be at most ${persistent ? '50 MB' : '2 MB'}.`); setFile(null); return }
+    const exactTypes = ['image/jpeg','image/png','image/webp','image/gif','audio/mpeg','audio/mp4','audio/wav','audio/webm','audio/ogg','video/mp4','video/webm','video/quicktime','application/pdf']
+    const allowed = exactTypes.includes(next.type) && (type === 'image' ? next.type.startsWith('image/') : type === 'audio' ? next.type.startsWith('audio/') : type === 'video' ? next.type.startsWith('video/') : next.type === 'application/pdf')
     if (!allowed) { setError(`Choose a valid ${type} file.`); setFile(null); return }
+    if (persistent) { setPreview(URL.createObjectURL(next)); return }
     const reader = new FileReader()
     reader.onerror = () => setError('The browser could not read this file.')
     reader.onload = () => setPreview(String(reader.result))
     reader.readAsDataURL(next)
   }
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!title.trim() || !description.trim()) return setError('Add both a title and a description.')
-    if (type !== 'letter' && (!file || !preview)) return setError(`Choose a ${type} file before saving.`)
-    onSave({ id: `memory-${Date.now()}`, personId, title: title.trim(), description: description.trim(), type, fileName: file?.name, dataUrl: preview || undefined, createdAt: new Date().toISOString(), tags: description.toLowerCase().split(/\W+/).filter((tag) => ['boston', 'harbor', 'evacuation', 'ocean', 'svalbard', 'surface'].includes(tag)) })
-    setSaved(true)
+    if ((persistent || type !== 'letter') && (!file || !preview)) return setError(`Choose a ${type} file before saving.`)
+    setSaving(true); setError('')
+    try {
+      await onSave({ personId, title: title.trim(), description: description.trim(), type, preview: preview || undefined }, file)
+      setSaved(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The memory could not be preserved.')
+    } finally { setSaving(false) }
   }
   return <Modal title="Add to the bloodline" onClose={onClose} large>
-    {saved ? <div className="form-success"><span><Icon name="spark" size={28} /></span><Kicker>MEMORY PRESERVED LOCALLY</Kicker><h3>{title}</h3><p>It now appears in {family.find((p) => p.id === personId)?.name}’s archive on this device.</p><button className="primary" onClick={onClose}>RETURN TO CONSTELLATION <Icon name="arrow" /></button></div>
+    {saved ? <div className="form-success"><span><Icon name="spark" size={28} /></span><Kicker>MEMORY PRESERVED {persistent ? 'IN PRIVATE STORAGE' : 'LOCALLY'}</Kicker><h3>{title}</h3><p>It now appears in {members.find((p) => p.id === personId)?.name}’s archive{persistent ? ' and will survive a refresh.' : ' on this device.'}</p><button className="primary" onClick={onClose}>RETURN TO CONSTELLATION <Icon name="arrow" /></button></div>
     : <form className="archive-form" onSubmit={submit}>
-      <p className="local-note"><b>LOCAL PROTOTYPE</b> Files are saved in this browser only. Cloud preservation and cross-device access require a backend.</p>
+      <p className="local-note"><b>{persistent ? 'PRIVATE SUPABASE ARCHIVE' : 'DEMO MODE'}</b> {persistent ? 'Files are encrypted in transit and stored in a private family path.' : 'Files are saved in this browser only. Sign in to preserve them across devices.'}</p>
       <div className="form-grid">
-        <label>FAMILY MEMBER<select value={personId} onChange={(e) => setPersonId(e.target.value)}>{family.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <label>MEDIA TYPE<select value={type} onChange={(e) => { setType(e.target.value as MemoryType); setFile(null); setPreview('') }}><option value="image">Photograph</option><option value="audio">Audio</option><option value="video">Video</option><option value="letter">Written record</option></select></label>
+        <label>FAMILY MEMBER<select value={personId} onChange={(e) => setPersonId(e.target.value)}>{members.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <label>MEDIA TYPE<select value={type} onChange={(e) => { setType(e.target.value as MemoryType); setFile(null); setPreview('') }}><option value="image">Photograph</option><option value="audio">Audio</option><option value="video">Video</option>{persistent && <option value="document">PDF document</option>}{!persistent && <option value="letter">Written record</option>}</select></label>
       </div>
       <label>MEMORY TITLE<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={70} placeholder="e.g. The last summer rain" /></label>
       <label>DESCRIPTION<textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="What should future generations know?" /></label>
-      {type !== 'letter' && <label className="file-field"><input type="file" accept={`${type}/*`} onChange={(e) => chooseFile(e.target.files?.[0] || null)} /><span><Icon name="upload" /><b>{file ? file.name : `CHOOSE ${type.toUpperCase()} FILE`}</b><small>Maximum 2 MB · stored only on this device</small></span></label>}
+      {type !== 'letter' && <label className="file-field"><input type="file" accept={type === 'document' ? 'application/pdf' : `${type}/*`} onChange={(e) => chooseFile(e.target.files?.[0] || null)} /><span><Icon name="upload" /><b>{file ? file.name : `CHOOSE ${type.toUpperCase()} FILE`}</b><small>Maximum {persistent ? '50 MB · private cloud storage' : '2 MB · stored only on this device'}</small></span></label>}
       {preview && type === 'image' && <img className="upload-preview" src={preview} alt="Selected file preview" />}
       {preview && type === 'audio' && <audio className="upload-media" src={preview} controls />}
       {preview && type === 'video' && <video className="upload-media" src={preview} controls />}
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary wide" type="submit">PRESERVE MEMORY <Icon name="archive" /></button>
+      <button className="primary wide" type="submit" disabled={saving}>{saving ? 'PRESERVING MEMORY…' : 'PRESERVE MEMORY'} <Icon name="archive" /></button>
     </form>}
+  </Modal>
+}
+
+function AccountPanel({ user, authLoading, families, activeFamilyId, archiveMode, onClose, onSelectFamily, onDemo, onFamilyCreated, onAncestorCreated }: {
+  user: User | null; authLoading: boolean; families: FamilyWithRole[]; activeFamilyId: string | null;
+  archiveMode: 'demo' | 'private'; onClose: () => void; onSelectFamily: (id: string) => void;
+  onDemo: () => void; onFamilyCreated: (family: FamilyWithRole) => void; onAncestorCreated: () => void;
+}) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [displayName, setDisplayName] = useState('')
+  const [familyName, setFamilyName] = useState(''); const [ancestorName, setAncestorName] = useState('')
+  const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
+  const run = async (action: () => Promise<void>) => { setBusy(true); setError(''); setMessage(''); try { await action() } catch (cause) { setError(cause instanceof Error ? cause.message : 'The request failed.') } finally { setBusy(false) } }
+  const submitAuth = (event: React.FormEvent) => { event.preventDefault(); void run(async () => {
+    if (mode === 'login') await signInWithEmail(email, password)
+    else { const result = await signUpWithEmail(email, password, displayName); setMessage(result.session ? 'Account created and signed in.' : 'Account created. Check your email to confirm the address, then sign in.') }
+  }) }
+  return <Modal title="Archive access" onClose={onClose} large>
+    {!isSupabaseConfigured ? <div className="form-success"><Kicker>DEMO MODE ACTIVE</Kicker><h3>Supabase credentials are not configured.</h3><p>Add the project URL and publishable key to <code>.env.local</code>, then restart Vite. The fictional demo remains available.</p><button className="primary" onClick={onClose}>RETURN TO DEMO</button></div>
+    : authLoading ? <div className="form-success"><Kicker>AUTHENTICATING</Kicker><p>Restoring the secure session…</p></div>
+    : !user ? <form className="archive-form" onSubmit={submitAuth}>
+      <div className="form-grid"><button type="button" className={mode === 'login' ? 'primary' : 'secondary'} onClick={() => setMode('login')}>SIGN IN</button><button type="button" className={mode === 'signup' ? 'primary' : 'secondary'} onClick={() => setMode('signup')}>CREATE ACCOUNT</button></div>
+      {mode === 'signup' && <label>DISPLAY NAME<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={80} /></label>}
+      <label>EMAIL<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" /></label>
+      <label>PASSWORD<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} required autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
+      {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="local-note" role="status">{message}</p>}
+      <button className="primary wide" disabled={busy}>{busy ? 'CONNECTING…' : mode === 'login' ? 'ENTER PRIVATE ARCHIVE' : 'CREATE ARCHIVE IDENTITY'}</button>
+    </form>
+    : <div className="archive-form">
+      <p className="local-note"><b>AUTHENTICATED</b> {user.email}</p>
+      <label>SELECT ARCHIVE<select value={archiveMode === 'demo' ? 'demo' : activeFamilyId || ''} onChange={(e) => e.target.value === 'demo' ? onDemo() : onSelectFamily(e.target.value)}><option value="demo">Voss / Vale fictional demo</option>{families.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.role}</option>)}</select></label>
+      <form className="form-grid" onSubmit={(event) => { event.preventDefault(); void run(async () => { const created = await createFamily(familyName.trim()); onFamilyCreated({ ...created, role: 'owner' }); setFamilyName(''); setMessage('Private family archive created.') }) }}>
+        <label>NEW FAMILY NAME<input value={familyName} onChange={(e) => setFamilyName(e.target.value)} required maxLength={120} /></label><button className="secondary" disabled={busy}>CREATE FAMILY</button>
+      </form>
+      {archiveMode === 'private' && activeFamilyId && <form className="form-grid" onSubmit={(event) => { event.preventDefault(); void run(async () => { await createAncestor({ familyId: activeFamilyId, name: ancestorName.trim() }); setAncestorName(''); onAncestorCreated(); setMessage('Ancestor added to this archive.') }) }}>
+        <label>ADD ANCESTOR<input value={ancestorName} onChange={(e) => setAncestorName(e.target.value)} required maxLength={160} /></label><button className="secondary" disabled={busy}>ADD ANCESTOR</button>
+      </form>}
+      {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="local-note" role="status">{message}</p>}
+      <div className="form-grid"><button className="primary" onClick={onClose}>OPEN SELECTED ARCHIVE</button><button className="secondary" onClick={() => void run(async () => { await signOut(); onDemo() })}>SIGN OUT</button></div>
+    </div>}
   </Modal>
 }
 
@@ -542,10 +608,77 @@ export default function App() {
   const [selectedAncestorId, setSelectedAncestorId] = usePersistentState<string>('project-echo-selected-ancestor-v1', family[0].id)
   const [memories, setMemories] = usePersistentState<StoredMemory[]>('project-echo-memories-v1', seededMemories)
   const [capsules, setCapsules] = usePersistentState<StoredCapsule[]>('project-echo-capsules-v1', [])
-  const selectedAncestor = family.find((person) => person.id === selectedAncestorId) ?? family[0]
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [families, setFamilies] = useState<FamilyWithRole[]>([])
+  const [activeFamilyId, setActiveFamilyId] = useState<string | null>(null)
+  const [archiveMode, setArchiveMode] = useState<'demo' | 'private'>('demo')
+  const [privateMembers, setPrivateMembers] = useState<FamilyMember[]>([])
+  const [privateMemories, setPrivateMemories] = useState<StoredMemory[]>([])
+  const [archiveError, setArchiveError] = useState('')
+  const [refreshVersion, setRefreshVersion] = useState(0)
+
+  useEffect(() => {
+    if (!supabase) { setAuthLoading(false); return }
+    let mounted = true
+    void getCurrentUser().then((current) => { if (mounted) { setUser(current); setAuthLoading(false) } })
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) { setUser(session?.user ?? null); setAuthLoading(false) }
+    })
+    return () => { mounted = false; data.subscription.unsubscribe() }
+  }, [])
+
+  useEffect(() => {
+    if (!user) { setFamilies([]); setActiveFamilyId(null); setArchiveMode('demo'); return }
+    let current = true
+    void getMyFamilies().then((items) => { if (current) setFamilies(items) }).catch((cause) => {
+      if (current) setArchiveError(cause instanceof Error ? cause.message : 'Could not load families.')
+    })
+    return () => { current = false }
+  }, [user, refreshVersion])
+
+  useEffect(() => {
+    if (!user || archiveMode !== 'private' || !activeFamilyId) { setPrivateMembers([]); setPrivateMemories([]); return }
+    let current = true
+    setArchiveError('')
+    void (async () => {
+      const rows = await getAncestors(activeFamilyId)
+      const positions = [{ x: 50, y: 19 }, { x: 34, y: 51 }, { x: 66, y: 51 }, { x: 50, y: 82 }]
+      const loadedMembers: FamilyMember[] = rows.map((row, index) => ({
+        id: row.id, name: row.name,
+        years: `${row.birth_year ?? '—'}—${row.death_year ?? ''}`,
+        gen: `GEN ${row.generation || index + 1}`,
+        memories: 0, biography: row.biography ?? undefined,
+        ...(positions[index] ?? { x: 18 + (index % 4) * 22, y: 20 + Math.floor(index / 4) * 28 }),
+      }))
+      const memoryRows = (await Promise.all(rows.map((row) => getMemoriesForAncestor(row.id)))).flat()
+      const loadedMemories = await Promise.all(memoryRows.map(async (row): Promise<StoredMemory> => {
+        const assets = await getMediaWithSignedUrls(row.id)
+        const media = assets[0]
+        const type: MemoryType = row.memory_type === 'photo' ? 'image' : row.memory_type === 'audio' ? 'audio' : row.memory_type === 'video' ? 'video' : row.memory_type === 'document' ? 'document' : 'letter'
+        const description = row.description ?? ''
+        return { id: row.id, personId: row.ancestor_id, title: row.title, description, type,
+          fileName: media?.original_filename, dataUrl: media?.signedUrl ?? undefined,
+          createdAt: row.memory_date ?? row.created_at,
+          tags: description.toLowerCase().split(/\W+/).filter((tag) => ['boston', 'harbor', 'evacuation', 'ocean', 'svalbard', 'surface'].includes(tag)) }
+      }))
+      if (current) {
+        setPrivateMembers(loadedMembers); setPrivateMemories(loadedMemories)
+        if (loadedMembers.length && !loadedMembers.some((item) => item.id === selectedAncestorId)) setSelectedAncestorId(loadedMembers[0].id)
+      }
+    })().catch((cause) => { if (current) setArchiveError(cause instanceof Error ? cause.message : 'Could not load the private archive.') })
+    return () => { current = false }
+  }, [user, archiveMode, activeFamilyId, refreshVersion])
+
+  const isPrivate = archiveMode === 'private' && Boolean(user && activeFamilyId)
+  const activeMembers = isPrivate ? privateMembers : family
+  const activeMemories = isPrivate ? privateMemories : memories
+  const selectedAncestor = activeMembers.find((person) => person.id === selectedAncestorId) ?? activeMembers[0] ?? family[0]
+  const activeFamily = families.find((item) => item.id === activeFamilyId)
   const go = (s: Screen) => { setScreen(s); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const enterMemory = (ancestorId: string) => {
-    const ancestor = family.find((person) => person.id === ancestorId)
+    const ancestor = activeMembers.find((person) => person.id === ancestorId)
     if (!ancestor || !reconstructedRoomIds.has(ancestor.id)) return
     setSelectedAncestorId(ancestor.id)
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return go('room')
@@ -553,14 +686,34 @@ export default function App() {
     window.setTimeout(() => setScreen('room'), 520)
     window.setTimeout(() => setTransitioning(false), 1250)
   }
+  const saveMemory = async (draft: UploadDraft, file: File | null): Promise<StoredMemory> => {
+    const tags = draft.description.toLowerCase().split(/\W+/).filter((tag) => ['boston', 'harbor', 'evacuation', 'ocean', 'svalbard', 'surface'].includes(tag))
+    if (!isPrivate || !activeFamilyId) {
+      const stored = { id: `memory-${Date.now()}`, personId: draft.personId, title: draft.title,
+        description: draft.description, type: draft.type, fileName: file?.name, dataUrl: draft.preview,
+        createdAt: new Date().toISOString(), tags }
+      setMemories((current) => [...current, stored]); return stored
+    }
+    if (!file) throw new Error('Choose a file to preserve in the private archive.')
+    const memoryType = draft.type === 'image' ? 'photo' : draft.type === 'letter' ? 'document' : draft.type
+    const result = await createMemoryWithMedia({ familyId: activeFamilyId, ancestorId: draft.personId,
+      title: draft.title, description: draft.description, memoryType }, file)
+    const [asset] = await getMediaWithSignedUrls(result.memory.id)
+    const stored: StoredMemory = { id: result.memory.id, personId: result.memory.ancestor_id, title: result.memory.title,
+      description: result.memory.description ?? '', type: draft.type, fileName: asset?.original_filename,
+      dataUrl: asset?.signedUrl ?? undefined, createdAt: result.memory.created_at, tags }
+    setPrivateMemories((current) => [...current, stored]); return stored
+  }
   return <Shell screen={screen} setScreen={go}>
     {transitioning && <div className="memory-transition" role="status" aria-live="polite"><div className="transition-stars">{Array.from({ length: 22 }, (_, index) => <i key={index} />)}</div><span>ENTERING {selectedAncestor.name.toUpperCase()}'S MEMORY</span></div>}
     {screen === 'vault' && <Vault go={go} />}
-    {screen === 'family' && <Family go={go} enterMemory={enterMemory} selected={selectedAncestor} setSelected={(ancestor) => setSelectedAncestorId(ancestor.id)} memories={memories} addMemory={(memory) => setMemories((current) => [...current, memory])} />}
-    {screen === 'room' && (reconstructedRoomIds.has(selectedAncestor.id) ? <Room go={go} ancestor={selectedAncestor} memories={memories} /> : <MemoryRoomUnavailable ancestor={selectedAncestor} memories={memories} go={go} />)}
+    {screen === 'family' && isPrivate && activeMembers.length === 0 ? <section className="inner-screen family-screen"><Breadcrumbs items={[{ label: 'Memory Vault', action: () => go('vault') }, { label: 'Private Family' }]} /><div className="form-success"><Kicker>PRIVATE ARCHIVE READY</Kicker><h2>Add your first <em>ancestor.</em></h2><p>{archiveError || 'This family has no ancestors yet. Add one before preserving a memory.'}</p><button className="primary" onClick={() => setAccountOpen(true)}>ADD ANCESTOR <Icon name="plus" /></button></div></section>
+    : screen === 'family' && <Family go={go} enterMemory={enterMemory} selected={selectedAncestor} setSelected={(ancestor) => setSelectedAncestorId(ancestor.id)} memories={activeMemories} members={activeMembers} archiveName={isPrivate ? activeFamily?.name ?? 'Private family' : 'Voss / Vale'} isPrivate={isPrivate} onAccount={() => setAccountOpen(true)} onSaveMemory={saveMemory} />}
+    {screen === 'room' && (reconstructedRoomIds.has(selectedAncestor.id) ? <Room go={go} ancestor={selectedAncestor} memories={activeMemories} /> : <MemoryRoomUnavailable ancestor={selectedAncestor} memories={activeMemories} go={go} />)}
     {screen === 'earth' && <Earth go={go} />}
-    {screen === 'echoes' && <Echoes go={go} memories={memories} />}
+    {screen === 'echoes' && <Echoes go={go} memories={activeMemories} />}
     {screen === 'reconstruction' && <Reconstruction go={go} />}
     {screen === 'capsule' && <Capsule go={go} capsules={capsules} saveCapsule={(capsule) => setCapsules((current) => [capsule, ...current])} />}
+    {accountOpen && <AccountPanel user={user} authLoading={authLoading} families={families} activeFamilyId={activeFamilyId} archiveMode={archiveMode} onClose={() => setAccountOpen(false)} onDemo={() => { setArchiveMode('demo'); setSelectedAncestorId(family[0].id); go('family') }} onSelectFamily={(id) => { setActiveFamilyId(id); setArchiveMode('private'); setSelectedAncestorId(''); go('family') }} onFamilyCreated={(created) => { setFamilies((current) => [...current, created]); setActiveFamilyId(created.id); setArchiveMode('private'); setSelectedAncestorId(''); setRefreshVersion((value) => value + 1); go('family') }} onAncestorCreated={() => setRefreshVersion((value) => value + 1)} />}
   </Shell>
 }
