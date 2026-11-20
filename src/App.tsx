@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   createAncestor, createFamily, createMemoryWithMedia, getAncestors, getCurrentUser,
@@ -320,96 +320,7 @@ function AccountPanel({ user, authLoading, families, activeFamilyId, archiveMode
   </Modal>
 }
 
-const hotspotData = {
-  photo: { icon: 'camera' as IconName, label: 'The Voss family photograph', hint: 'A spring afternoon in 2041', meta: 'FABRICATED DEMO PHOTOGRAPH · 18 APR 2041', title: 'The afternoon the rain stopped', image: oldPhotosImage, text: 'Three-year-old Mara sits between her mother, Elena, and grandfather Tomas outside their harbor apartment. Years later, Mara wrote on the reverse: “I remember the wet pavement more than the faces.”' },
-  letter: { icon: 'letter' as IconName, label: 'Mara’s unsent letter', hint: 'Written hours before evacuation', meta: 'FABRICATED DEMO LETTER · 22 MAR 2058', title: 'To whoever finds this', image: paperImage, text: 'Twenty-year-old Mara wrote this while Elena packed their evacuation cases. It records harbor alarms beginning before the Directorate’s public warning.' },
-  audio: { icon: 'audio' as IconName, label: 'Kitchen tape recorder', hint: 'Mara’s voice at age twenty', meta: 'FABRICATED DEMO RECORDING · 21 MAR 2058', title: 'Rain against the kitchen glass', image: recorderImage, text: 'Recorded the evening before evacuation, Mara hums a song Jonas taught her, then describes unmarked vehicles moving toward the north gate.' },
-  keepsake: { icon: 'spark' as IconName, label: 'Brass seed locket', hint: 'A gift from Elena to Mara', meta: 'FABRICATED DEMO KEEPSAKE · 2056–2080', title: 'The seed she carried below', image: scrapbookImage, text: 'Inside the locket is a pressed calendula seed from Elena’s greenhouse. Mara wore it through the evacuation and later gave it to Lia on her eighteenth birthday.' },
-  window: { icon: 'earth' as IconName, label: 'The harbor window', hint: 'Look toward the evacuation route', meta: 'RECONSTRUCTED ENVIRONMENT · 89% CONFIDENCE', title: 'The convoy before the warning', image: oceanImage, text: 'This reconstructed view combines Mara’s photographs, municipal geometry, and her 2058 letter. At 04:51, lights appear on the north bridge—fifty-one minutes before the official warning.' },
-}
-
-function Room({ go, openHumanLegacy, ancestor, memories }: { go: (s: Screen) => void; openHumanLegacy: (locationSlug: string, recordSlug?: string) => void; ancestor: FamilyMember; memories: StoredMemory[] }) {
-  const [open, setOpen] = useState<keyof typeof hotspotData | null>(null)
-  const [lastExplored, setLastExplored] = useState<keyof typeof hotspotData | null>(null)
-  const [explored, setExplored] = useState<(keyof typeof hotspotData)[]>([])
-  const [archiveOpen, setArchiveOpen] = useState(false)
-  const ancestorMemories = memories.filter((memory) => memory.personId === ancestor.id)
-  const openArtifact = (key: keyof typeof hotspotData) => {
-    setOpen(key)
-    setLastExplored(key)
-    setExplored((current) => current.includes(key) ? current : [...current, key])
-  }
-  const complete = explored.length === Object.keys(hotspotData).length
-  return (
-    <section className={`room-screen memory-world ${open ? 'memory-is-open' : ''} ${lastExplored ? `last-${lastExplored}` : ''}`} style={{ backgroundImage: `url(${roomImage})` }}>
-      <div className="room-depth" aria-hidden="true">
-        <div className="sunbeam" /><div className="floating-dust">{Array.from({ length: 16 }, (_, index) => <i key={index} />)}</div>
-        <div className="foreground-table" style={{ backgroundImage: `url(${scrapbookImage})` }} />
-      </div>
-      <Breadcrumbs items={[{ label: 'Memory Vault', action: () => go('vault') }, { label: 'Family Legacy', action: () => go('family') }, { label: `${ancestor.name}'s Room` }]} />
-      <div className="room-top">
-        <button className="text-button" onClick={() => go('family')}>← BACK TO FAMILY</button>
-        <div><Kicker>RECONSTRUCTED MEMORY · 87% CONFIDENCE</Kicker><h2>{ancestor.name.split(' ')[0]}'s Room, <em>2058</em></h2></div>
-        <span className="room-time">18:42 · COASTAL SECTOR</span>
-      </div>
-      <p className="room-instruction"><span>THIS ROOM REMEMBERS</span>Move gently. The objects Mara touched still carry pieces of her story.</p>
-      {(Object.keys(hotspotData) as (keyof typeof hotspotData)[]).map((key, i) => (
-        <button key={key} className={`hotspot hotspot-${i + 1} ${explored.includes(key) ? 'explored' : ''} ${lastExplored === key ? 'last-explored' : ''}`} onClick={() => openArtifact(key)} aria-label={`Open ${hotspotData[key].label}: ${hotspotData[key].hint}`}>
-          <span className="hotspot-pulse" /><span className="hotspot-icon"><Icon name={hotspotData[key].icon} /></span><span className="hotspot-label"><b>{hotspotData[key].label}</b><small>{hotspotData[key].hint}</small></span>{explored.includes(key) && <i className="explored-mark">VIEWED</i>}
-        </button>
-      ))}
-      <nav className="artifact-list" aria-label="Artifacts in Mara Voss's memory room">
-        <span>MEMORIES IN THIS ROOM · {explored.length}/{Object.keys(hotspotData).length} EXPLORED</span>
-        <div>{(Object.keys(hotspotData) as (keyof typeof hotspotData)[]).map((key) => <button key={key} className={explored.includes(key) ? 'explored' : ''} onClick={() => openArtifact(key)}><Icon name={hotspotData[key].icon} /><span><b>{hotspotData[key].label}</b><small>{hotspotData[key].hint}</small></span><i>{explored.includes(key) ? '✓' : '→'}</i></button>)}</div>
-      </nav>
-      <button className="room-archive-button secondary" onClick={() => setArchiveOpen(true)}><Icon name="archive" /> VIEW {ancestorMemories.length} ARCHIVE OBJECTS</button>
-      <div className="room-footer"><span><i className="cyan-dot" /> ORIGINAL</span><span><i className="amber-dot" /> CONTRIBUTED</span><span><i className="white-dot" /> RECONSTRUCTED</span><small>Example media shown for prototype</small></div>
-      {open && <MemoryObject objectKey={open} go={go} openHumanLegacy={openHumanLegacy} onClose={() => setOpen(null)} />}
-      {archiveOpen && <Modal title={`${ancestor.name}'s archive`} onClose={() => setArchiveOpen(false)} large>
-        <div className="object-list">{ancestorMemories.map((memory) => <article key={memory.id}>
-          <div>{memory.type === 'image' && memory.dataUrl ? <img src={memory.dataUrl} alt="" /> : <Icon name={memory.type === 'audio' ? 'audio' : memory.type === 'letter' ? 'letter' : 'archive'} size={24} />}</div>
-          <span><small>{memory.type.toUpperCase()} · {new Date(memory.createdAt).getFullYear()}</small><b>{memory.title}</b><p>{memory.description}</p></span>
-          {memory.type === 'audio' && memory.dataUrl?.startsWith('data:audio') && <audio controls src={memory.dataUrl} />}
-        </article>)}</div>
-      </Modal>}
-      {complete && !open && <div className="memory-complete" role="status"><span><Icon name="spark" size={24} /></span><div><Kicker>MARA’S STORY · PRIMARY MEMORIES EXPLORED</Kicker><h3>You found what she wanted Lia to remember.</h3><p>The room remains open. Follow the window memory into the Human Legacy archive, or return to the family constellation.</p></div><button className="primary" onClick={() => openHumanLegacy('boston-harbor', 'gate-transit-log-17-b')}>FOLLOW THE HARBOR EVIDENCE <Icon name="arrow" /></button><button className="text-button" onClick={() => go('family')}>RETURN TO FAMILY</button></div>}
-    </section>
-  )
-}
-
-function MemoryObject({ objectKey, go, openHumanLegacy, onClose }: { objectKey: keyof typeof hotspotData; go: (s: Screen) => void; openHumanLegacy: (locationSlug: string, recordSlug?: string) => void; onClose: () => void }) {
-  const item = hotspotData[objectKey]
-  return <Modal title={item.title} onClose={onClose} large variant="memory">
-    <div className={`memory-object memory-object-${objectKey}`}>
-      {objectKey === 'photo' && <><div className="polaroid"><img src={item.image} alt="Fabricated demo photograph representing Mara Voss with her family" /><span>18 APR 2041 · VOSS FAMILY HOME</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>Before Mara could remember <em>the sky.</em></h3><p>{item.text}</p><div className="archive-context"><b>CURATOR’S NOTE</b><p>This fabricated demo image represents a photograph Lia preserved with Mara’s effects. The people shown are illustrative, not real historical subjects.</p></div></div></>}
-      {objectKey === 'letter' && <><div className="letter-sheet"><small>22 March 2058 · 05:29</small><p>To whoever finds this,</p><p>They moved the departure forward. The public bulletin says weather, but we heard the harbor alarms before dawn.</p><p>Mother put my blue coat by the door. She says we are going to see the trains. I don’t think that is true.</p><b>— Mara Voss, age 20</b></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>The letter Mara <em>hid.</em></h3><p>{item.text}</p><div className="archive-context"><b>RECOVERY</b><p>Fictional demo record: found inside Elena Voss’s cookbook in 2080. The narrative connects to the Boston Harbor evacuation case.</p></div><button className="primary" onClick={() => openHumanLegacy('boston-harbor', 'elena-voss-letter')}>OPEN HUMAN LEGACY RECORD <Icon name="arrow" /></button></div></>}
-      {objectKey === 'audio' && <><div className="recorder-display"><img src={item.image} alt="Example vintage recording device representing Mara's recorder" /><div className="tape-reels"><i /><i /></div><span className="demo-stamp">FABRICATED DEMO DEVICE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>Mara’s voice, in the <em>kitchen.</em></h3><p>{item.text}</p><DemoAudioPlayer /><div className="transcript"><b>TRANSCRIPT · 00:31–00:46</b><p>“Jonas says they’re weather trucks. They aren’t. No markings, no headlights. Seventeen, maybe eighteen, all going north.”</p></div></div></>}
-      {objectKey === 'keepsake' && <><div className="keepsake-display"><img src={item.image} alt="Fabricated demo arrangement representing Mara's brass seed locket" /><div className="locket"><i /></div><span>FABRICATED DEMO KEEPSAKE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>A small piece of the <em>surface.</em></h3><p>{item.text}</p><div className="archive-context"><b>FAMILY PROVENANCE</b><p>Elena Voss → Mara Voss → Lia Vale. The locket represents the family’s connection to Elena’s forbidden seed work.</p></div></div></>}
-      {objectKey === 'window' && <><div className="window-memory"><img src={item.image} alt="Reconstructed demo view of Boston Harbor from Mara Voss's window" /><span>RECONSTRUCTED ENVIRONMENT · COLOR INTERPRETIVE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>What Mara saw <em>before the warning.</em></h3><p>{item.text}</p><div className="evidence-link"><span>04:51</span><div><b>NORTH BRIDGE CONVOY</b><p>Matches recovered Gate Transit Log 17-B in Human Legacy.</p></div></div><button className="primary" onClick={() => openHumanLegacy('boston-harbor', 'gate-transit-log-17-b')}>FOLLOW EVIDENCE TO HUMAN LEGACY <Icon name="arrow" /></button></div></>}
-    </div>
-  </Modal>
-}
-
-function DemoAudioPlayer() {
-  const [playing, setPlaying] = useState(false)
-  const transcript = 'Jonas says they are weather trucks. They are not. No markings, no headlights. Seventeen, maybe eighteen, all going north.'
-  useEffect(() => () => window.speechSynthesis?.cancel(), [])
-  const toggle = () => {
-    if (playing) {
-      window.speechSynthesis?.cancel()
-      return setPlaying(false)
-    }
-    if (!('speechSynthesis' in window)) return
-    const utterance = new SpeechSynthesisUtterance(transcript)
-    utterance.rate = .82
-    utterance.pitch = .88
-    utterance.onend = () => setPlaying(false)
-    utterance.onerror = () => setPlaying(false)
-    setPlaying(true)
-    window.speechSynthesis.speak(utterance)
-  }
-  return <div className={`narrated-demo ${playing ? 'playing' : ''}`}><button onClick={toggle} aria-label={playing ? 'Stop fabricated demo transcript' : 'Play fabricated demo transcript'}><Icon name={playing ? 'pause' : 'play'} /></button><div><b>{playing ? 'PLAYING TRANSCRIPT' : 'PLAY FABRICATED DEMO TRANSCRIPT'}</b><span>Browser-generated narration · not Mara’s real voice</span></div><i /></div>
-}
+const MemoryRoom = lazy(() => import('./features/memory-room/MemoryRoom'))
 
 function MemoryRoomUnavailable({ ancestor, memories, go }: { ancestor: FamilyMember; memories: StoredMemory[]; go: (s: Screen) => void }) {
   const preserved = memories.filter((memory) => memory.personId === ancestor.id)
@@ -720,7 +631,30 @@ export default function App() {
     {screen === 'vault' && <Vault go={go} />}
     {screen === 'family' && isPrivate && activeMembers.length === 0 ? <section className="inner-screen family-screen"><Breadcrumbs items={[{ label: 'Memory Vault', action: () => go('vault') }, { label: 'Private Family' }]} /><div className="form-success"><Kicker>PRIVATE ARCHIVE READY</Kicker><h2>Add your first <em>ancestor.</em></h2><p>{archiveError || 'This family has no ancestors yet. Add one before preserving a memory.'}</p><button className="primary" onClick={() => setAccountOpen(true)}>ADD ANCESTOR <Icon name="plus" /></button></div></section>
     : screen === 'family' && <Family go={go} enterMemory={enterMemory} selected={selectedAncestor} setSelected={(ancestor) => setSelectedAncestorId(ancestor.id)} memories={activeMemories} members={activeMembers} archiveName={isPrivate ? activeFamily?.name ?? 'Private family' : 'Voss / Vale'} isPrivate={isPrivate} onAccount={() => setAccountOpen(true)} onSaveMemory={saveMemory} />}
-    {screen === 'room' && (reconstructedRoomIds.has(selectedAncestor.id) ? <Room go={go} openHumanLegacy={openHumanLegacy} ancestor={selectedAncestor} memories={activeMemories} /> : <MemoryRoomUnavailable ancestor={selectedAncestor} memories={activeMemories} go={go} />)}
+    {screen === 'room' && (
+      reconstructedRoomIds.has(selectedAncestor.id) ? (
+        <Suspense
+          fallback={
+            <div className="room-screen memory-world" style={{ display: 'grid', placeItems: 'center' }}>
+              <div className="retrieval-core">
+                <i /><span />
+                <b>RECONSTRUCTING 3D ARCHIVE…</b>
+                <small>VAULT 01 · 2087</small>
+              </div>
+            </div>
+          }
+        >
+          <MemoryRoom
+            go={go}
+            openHumanLegacy={openHumanLegacy}
+            ancestor={selectedAncestor}
+            memories={activeMemories}
+          />
+        </Suspense>
+      ) : (
+        <MemoryRoomUnavailable ancestor={selectedAncestor} memories={activeMemories} go={go} />
+      )
+    )}
     {screen === 'earth' && <HistoricalArchive initialLocationSlug={humanTarget.locationSlug} initialRecordSlug={humanTarget.recordSlug} onNavigate={go} onTargetOpened={humanTarget.autoOpen ? () => setHumanTarget((current) => ({ ...current, autoOpen: false })) : undefined} userId={user?.id} onRequestSignIn={() => setAccountOpen(true)} />}
     {screen === 'echoes' && <Echoes go={go} openHumanLegacy={openHumanLegacy} memories={activeMemories} />}
     {screen === 'reconstruction' && <Reconstruction go={go} />}
