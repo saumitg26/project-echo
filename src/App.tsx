@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import AudioPlayer from './audio/AudioPlayer'
 import { MARA_KITCHEN_TRANSCRIPT } from './audio/demoNarration'
+import AudioRecorder from './audio/AudioRecorder'
+import { blobToDataUrl } from './audio/utils'
+import type { AudioSourceType, RecordingResult, TranscriptionStatus } from './audio/types'
 
 type Screen = 'vault' | 'family' | 'room' | 'earth' | 'echoes' | 'reconstruction' | 'capsule'
 type IconName = 'arrow' | 'archive' | 'audio' | 'camera' | 'close' | 'earth' | 'family' | 'letter' | 'menu' | 'pause' | 'play' | 'plus' | 'record' | 'spark' | 'upload'
 type MemoryType = 'image' | 'audio' | 'video' | 'letter'
-type StoredMemory = { id: string; personId: string; title: string; description: string; type: MemoryType; fileName?: string; dataUrl?: string; createdAt: string; tags: string[] }
-type StoredCapsule = { id: string; message: string; recipient: string; unlockYear: number; attachmentName?: string; attachmentUrl?: string; createdAt: string }
+type StoredMemory = { id: string; personId: string; title: string; description: string; type: MemoryType; fileName?: string; dataUrl?: string; mimeType?: string; durationSeconds?: number; audioSource?: AudioSourceType; transcript?: string; transcriptStatus?: TranscriptionStatus; createdAt: string; tags: string[] }
+type StoredCapsule = { id: string; message: string; recipient: string; unlockYear: number; attachmentName?: string; attachmentUrl?: string; voiceUrl?: string; voiceMimeType?: string; voiceDurationSeconds?: number; createdAt: string }
 
 const oceanImage = 'https://images.unsplash.com/photo-1747182922993-9c7dde01c97f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=85&w=1600'
 const cityImage = 'https://images.unsplash.com/photo-1653207771914-f7d37303755c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=85&w=1600'
@@ -215,8 +218,41 @@ function UploadMemory({ initialPerson, onClose, onSave }: { initialPerson: strin
   const [preview, setPreview] = useState('')
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  const [recMeta, setRecMeta] = useState<{
+  mimeType: string
+  durationSeconds: number
+} | null>(null)
+
+const saveRecording = async (recording: RecordingResult) => {
+  setError('')
+  if (recording.sizeBytes > 2_000_000) {
+    setError('This recording exceeds 2 MB. Record a shorter memory.')
+    return
+  }
+
+  try {
+    const dataUrl = await blobToDataUrl(recording.blob)
+    const audioFile = new File(
+      [recording.blob],
+      `recording-${Date.now()}.${recording.extension}`,
+      { type: recording.mimeType },
+    )
+
+    setFile(audioFile)
+    setPreview(dataUrl)
+    setRecMeta({
+      mimeType: recording.mimeType,
+      durationSeconds: recording.durationSeconds,
+    })
+  } catch {
+    setError('The browser could not read this recording.')
+  }
+}
   const chooseFile = (next: File | null) => {
-    setError(''); setFile(next); setPreview('')
+    setError('')
+    setFile(next)
+    setPreview('')
+    setRecMeta(null)
     if (!next) return
     if (next.size > 2_000_000) { setError('This local prototype accepts files up to 2 MB to protect browser storage.'); setFile(null); return }
     const allowed = type === 'image' ? next.type.startsWith('image/') : type === 'audio' ? next.type.startsWith('audio/') : next.type.startsWith('video/')
@@ -230,7 +266,14 @@ function UploadMemory({ initialPerson, onClose, onSave }: { initialPerson: strin
     event.preventDefault()
     if (!title.trim() || !description.trim()) return setError('Add both a title and a description.')
     if (type !== 'letter' && (!file || !preview)) return setError(`Choose a ${type} file before saving.`)
-    onSave({ id: `memory-${Date.now()}`, personId, title: title.trim(), description: description.trim(), type, fileName: file?.name, dataUrl: preview || undefined, createdAt: new Date().toISOString(), tags: description.toLowerCase().split(/\W+/).filter((tag) => ['boston', 'harbor', 'evacuation', 'ocean', 'svalbard', 'surface'].includes(tag)) })
+    onSave({ id: `memory-${Date.now()}`, personId, title: title.trim(), description: description.trim(), type, fileName: file?.name, dataUrl: preview || undefined,...(type === 'audio' && recMeta
+  ? {
+      mimeType: recMeta.mimeType,
+      durationSeconds: recMeta.durationSeconds,
+      audioSource: 'original' as const,
+      transcriptStatus: 'none' as const,
+    }
+  : {}), createdAt: new Date().toISOString(), tags: description.toLowerCase().split(/\W+/).filter((tag) => ['boston', 'harbor', 'evacuation', 'ocean', 'svalbard', 'surface'].includes(tag)) })
     setSaved(true)
   }
   return <Modal title="Add to the bloodline" onClose={onClose} large>
@@ -239,13 +282,44 @@ function UploadMemory({ initialPerson, onClose, onSave }: { initialPerson: strin
       <p className="local-note"><b>LOCAL PROTOTYPE</b> Files are saved in this browser only. Cloud preservation and cross-device access require a backend.</p>
       <div className="form-grid">
         <label>FAMILY MEMBER<select value={personId} onChange={(e) => setPersonId(e.target.value)}>{family.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <label>MEDIA TYPE<select value={type} onChange={(e) => { setType(e.target.value as MemoryType); setFile(null); setPreview('') }}><option value="image">Photograph</option><option value="audio">Audio</option><option value="video">Video</option><option value="letter">Written record</option></select></label>
+        <label>MEDIA TYPE<select value={type} onChange={(e) => {
+  setType(e.target.value as MemoryType)
+  setFile(null)
+  setPreview('')
+  setRecMeta(null)
+}}><option value="image">Photograph</option><option value="audio">Audio</option><option value="video">Video</option><option value="letter">Written record</option></select></label>
       </div>
       <label>MEMORY TITLE<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={70} placeholder="e.g. The last summer rain" /></label>
       <label>DESCRIPTION<textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="What should future generations know?" /></label>
       {type !== 'letter' && <label className="file-field"><input type="file" accept={`${type}/*`} onChange={(e) => chooseFile(e.target.files?.[0] || null)} /><span><Icon name="upload" /><b>{file ? file.name : `CHOOSE ${type.toUpperCase()} FILE`}</b><small>Maximum 2 MB · stored only on this device</small></span></label>}
       {preview && type === 'image' && <img className="upload-preview" src={preview} alt="Selected file preview" />}
-      {preview && type === 'audio' && <audio className="upload-media" src={preview} controls />}
+      {type === 'audio' && !file && (
+  <>
+    <p className="echo-rec-note">OR RECORD NOW</p>
+    <AudioRecorder
+      confirmLabel="USE THIS RECORDING"
+      onConfirm={saveRecording}
+    />
+  </>
+)}
+
+{type === 'audio' && preview && (
+  <>
+    <audio className="upload-media" src={preview} controls />
+    <button
+      type="button"
+      className="text-button"
+      onClick={() => {
+        setFile(null)
+        setPreview('')
+        setRecMeta(null)
+        setError('')
+      }}
+    >
+      REMOVE AUDIO
+    </button>
+  </>
+)}
       {preview && type === 'video' && <video className="upload-media" src={preview} controls />}
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="primary wide" type="submit">PRESERVE MEMORY <Icon name="archive" /></button>
@@ -454,20 +528,19 @@ function Reconstruction({ go }: { go: (s: Screen) => void }) {
 
 function Capsule({ go, capsules, saveCapsule }: { go: (s: Screen) => void; capsules: StoredCapsule[]; saveCapsule: (capsule: StoredCapsule) => void }) {
   const [step, setStep] = useState(0)
-  const [recording, setRecording] = useState(false)
-  const [seconds, setSeconds] = useState(0)
   const [letter, setLetter] = useState('I want you to know that before the shelters, your family stood beneath an open sky. We kept asking questions, even when answers were hidden.')
   const [created, setCreated] = useState(false)
   const [recipient, setRecipient] = useState('My descendants')
   const [unlockYears, setUnlockYears] = useState(30)
   const [attachment, setAttachment] = useState<{ name: string; url: string; type: string } | null>(null)
   const [error, setError] = useState('')
-  useEffect(() => {
-    if (!recording) return
-    const timer = window.setInterval(() => setSeconds((s) => s + 1), 1000)
-    return () => window.clearInterval(timer)
-  }, [recording])
-  const format = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const [voice, setVoice] = useState<{ url: string; mimeType: string; durationSeconds: number } | null>(null)
+  const saveVoice = async (r: RecordingResult) => {
+    setError('')
+    if (r.sizeBytes > 2_000_000) return setError('This recording is too large for local browser storage. Record a shorter message.')
+    try { setVoice({ url: await blobToDataUrl(r.blob), mimeType: r.mimeType, durationSeconds: r.durationSeconds }) }
+    catch { setError('The browser could not store this recording.') }
+  }
   const attachFile = (file: File | null) => {
     setError('')
     if (!file) return
@@ -480,10 +553,10 @@ function Capsule({ go, capsules, saveCapsule }: { go: (s: Screen) => void; capsu
   }
   const seal = () => {
     if (!letter.trim()) return setError('Write a message before sealing the capsule.')
-    saveCapsule({ id: `capsule-${Date.now()}`, message: letter.trim(), recipient, unlockYear: 2087 + unlockYears, attachmentName: attachment?.name, attachmentUrl: attachment?.url, createdAt: new Date().toISOString() })
+    saveCapsule({ id: `capsule-${Date.now()}`, message: letter.trim(), recipient, unlockYear: 2087 + unlockYears, attachmentName: attachment?.name, attachmentUrl: attachment?.url, voiceUrl: voice?.url, voiceMimeType: voice?.mimeType, voiceDurationSeconds: voice?.durationSeconds, createdAt: new Date().toISOString() })
     setCreated(true)
   }
-  if (created) return <section className="capsule-complete"><div className="capsule-object"><span /><i /></div><Kicker>CAPSULE ECHO–7A–2087 SEALED LOCALLY</Kicker><h2>For those who come <em>after us.</em></h2><p>Your capsule is stored on this device and simulates an unlock in {2087 + unlockYears}. Real scheduled delivery and identity verification require a secure backend.</p><button className="secondary" onClick={() => { setCreated(false); setStep(0) }}>CREATE ANOTHER</button></section>
+  if (created) return <section className="capsule-complete"><div className="capsule-object"><span /><i /></div><Kicker>CAPSULE ECHO–7A–2087 SEALED LOCALLY</Kicker><h2>For those who come <em>after us.</em></h2><p>Your capsule is stored on this device and simulates an unlock in {2087 + unlockYears}. Real scheduled delivery and identity verification require a secure backend.</p><button className="secondary" onClick={() => { setCreated(false); setStep(0); setVoice(null) }}>CREATE ANOTHER</button></section>
   return (
     <section className="inner-screen capsule-screen">
       <Breadcrumbs items={[{ label: 'Memory Vault', action: () => go('vault') }, { label: 'Time Capsules' }]} />
@@ -493,8 +566,8 @@ function Capsule({ go, capsules, saveCapsule }: { go: (s: Screen) => void; capsu
           {['Voice message', 'Photographs', 'Written letter', 'Recipients', 'Preview capsule'].map((s, i) => <button className={step === i ? 'active' : ''} onClick={() => setStep(i)} key={s}><span>0{i + 1}</span><b>{s}</b><i /></button>)}
         </nav>
         <div className="capsule-editor">
-          {step === 0 && <div className="editor-section"><Kicker>01 · YOUR VOICE</Kicker><h3>Speak to someone you may never meet.</h3><p>This prototype demonstrates the recording state. Your microphone is not accessed and no audio is captured.</p>
-            <div className={`recorder ${recording ? 'recording' : ''}`}><button onClick={() => setRecording(!recording)} aria-label={recording ? 'Stop recording demonstration' : 'Start recording demonstration'}><Icon name={recording ? 'pause' : 'record'} size={24} /></button><div className="wave">{[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map((n) => <i key={n} style={{ height: recording ? `${10 + ((n * 13) % 35)}px` : '2px' }} />)}</div><b>{format}</b></div>
+          {step === 0 && <div className="editor-section"><Kicker>01 · YOUR VOICE</Kicker><h3>Speak to someone you may never meet.</h3><p>Record with your microphone. Your browser will ask for permission, and the recording stays in this browser.</p>
+          {voice ? <div className="voice-saved"><Kicker>VOICE MESSAGE SAVED · {Math.round(voice.durationSeconds)}s</Kicker><audio controls src={voice.url} /><button type="button" className="text-button" onClick={() => setVoice(null)}>REMOVE AND RECORD AGAIN</button></div> : <AudioRecorder confirmLabel="USE THIS VOICE MESSAGE" onConfirm={saveVoice} />}
           </div>}
           {step === 1 && <div className="editor-section"><Kicker>02 · ATTACHMENT</Kicker><h3>Choose what they should see or hear.</h3><p>Add one photograph or audio recording. It is stored only in this browser.</p><div className="photo-upload-grid">{attachment && <div className="added-photo">{attachment.type.startsWith('image/') ? <img src={attachment.url} alt="Capsule attachment preview" /> : <div className="audio-attachment"><Icon name="audio" size={30} /><audio controls src={attachment.url} /></div>}<button onClick={() => setAttachment(null)} aria-label="Remove attachment">×</button></div>}<label className="add-photo"><input type="file" accept="image/*,audio/*" onChange={(e) => attachFile(e.target.files?.[0] || null)} /><Icon name="plus" /><b>ADD PHOTO OR RECORDING</b><span>Maximum 2 MB</span></label></div></div>}
           {step === 2 && <div className="editor-section"><Kicker>03 · WRITTEN LETTER</Kicker><h3>Words for the future.</h3><textarea value={letter} onChange={(e) => setLetter(e.target.value)} aria-label="Letter to future descendants" /><span className="char-count">{letter.length} / 1,200 CHARACTERS</span></div>}

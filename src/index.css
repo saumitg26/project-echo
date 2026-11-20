@@ -253,3 +253,18 @@ h2 em, h3 em { color: var(--amber); font-family: 'Playfair Display'; font-weight
 .echo-player-transcript{border:1px solid #59462f;background:#17100b88;padding:12px;margin-top:12px;max-height:180px;overflow-y:auto}
 .echo-player-transcript b{font:8px 'DM Mono';letter-spacing:.12em;color:#d4ae78}
 .echo-player-transcript p{font:12px/1.6 'Manrope';color:#a39a8c;margin:8px 0}
+
+/* ---- Echo audio recorder ---- */
+.echo-rec{border:1px solid #6a5031;background:#130e0a;padding:14px;margin-top:12px;display:flex;flex-direction:column;gap:10px}
+.echo-rec-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.echo-rec-btn{border:1px solid #bf8f52;background:#392616;color:#edbd78;font:9px 'DM Mono';letter-spacing:.1em;padding:10px 14px;cursor:pointer}
+.echo-rec-btn.ghost{background:none}
+.echo-rec-btn.stop{border-color:#e59a8a;color:#f3b4a6}
+.echo-rec-dot{width:10px;height:10px;border-radius:50%;background:#e5533d;animation:echo-rec-pulse 1s ease-in-out infinite}
+@keyframes echo-rec-pulse{50%{opacity:.25}}
+.echo-rec-time{font:14px 'DM Mono';color:#e4d3b8}
+.echo-rec-note{font:10px 'DM Mono';color:#8f806c;margin:0}
+.echo-rec-error{font:11px/1.5 'Manrope';color:#e59a8a;margin:0;flex:1}
+.echo-rec audio{width:100%}
+.voice-saved{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.voice-saved audio{width:100%}
