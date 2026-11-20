@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import AudioPlayer from './audio/AudioPlayer'
+import { MARA_KITCHEN_TRANSCRIPT } from './audio/demoNarration'
 
 type Screen = 'vault' | 'family' | 'room' | 'earth' | 'echoes' | 'reconstruction' | 'capsule'
 type IconName = 'arrow' | 'archive' | 'audio' | 'camera' | 'close' | 'earth' | 'family' | 'letter' | 'menu' | 'pause' | 'play' | 'plus' | 'record' | 'spark' | 'upload'
@@ -314,32 +316,11 @@ function MemoryObject({ objectKey, go, onClose }: { objectKey: keyof typeof hots
     <div className={`memory-object memory-object-${objectKey}`}>
       {objectKey === 'photo' && <><div className="polaroid"><img src={item.image} alt="Fabricated demo photograph representing Mara Voss with her family" /><span>18 APR 2041 · VOSS FAMILY HOME</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>Before Mara could remember <em>the sky.</em></h3><p>{item.text}</p><div className="archive-context"><b>CURATOR’S NOTE</b><p>This fabricated demo image represents a photograph Lia preserved with Mara’s effects. The people shown are illustrative, not real historical subjects.</p></div></div></>}
       {objectKey === 'letter' && <><div className="letter-sheet"><small>22 March 2058 · 05:29</small><p>To whoever finds this,</p><p>They moved the departure forward. The public bulletin says weather, but we heard the harbor alarms before dawn.</p><p>Mother put my blue coat by the door. She says we are going to see the trains. I don’t think that is true.</p><b>— Mara Voss, age 20</b></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>The letter Mara <em>hid.</em></h3><p>{item.text}</p><div className="archive-context"><b>RECOVERY</b><p>Fictional demo record: found inside Elena Voss’s cookbook in 2080. The narrative connects to the Boston Harbor evacuation case.</p></div><button className="primary" onClick={() => go('earth')}>OPEN HUMAN LEGACY RECORD <Icon name="arrow" /></button></div></>}
-      {objectKey === 'audio' && <><div className="recorder-display"><img src={item.image} alt="Example vintage recording device representing Mara's recorder" /><div className="tape-reels"><i /><i /></div><span className="demo-stamp">FABRICATED DEMO DEVICE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>Mara’s voice, in the <em>kitchen.</em></h3><p>{item.text}</p><DemoAudioPlayer /><div className="transcript"><b>TRANSCRIPT · 00:31–00:46</b><p>“Jonas says they’re weather trucks. They aren’t. No markings, no headlights. Seventeen, maybe eighteen, all going north.”</p></div></div></>}
+      {objectKey === 'audio' && <><div className="recorder-display"><img src={item.image} alt="Example vintage recording device representing Mara's recorder" /><div className="tape-reels"><i /><i /></div><span className="demo-stamp">FABRICATED DEMO DEVICE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>Mara’s voice, in the <em>kitchen.</em></h3><p>{item.text}</p><AudioPlayer src="/audio/mara-rain-kitchen-glass.mp3" title={item.title} ancestorName="Mara Voss" dateLabel="21 March 2058" sourceType="ai-generated-demo" transcript={MARA_KITCHEN_TRANSCRIPT} /></div></>}
       {objectKey === 'keepsake' && <><div className="keepsake-display"><img src={item.image} alt="Fabricated demo arrangement representing Mara's brass seed locket" /><div className="locket"><i /></div><span>FABRICATED DEMO KEEPSAKE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>A small piece of the <em>surface.</em></h3><p>{item.text}</p><div className="archive-context"><b>FAMILY PROVENANCE</b><p>Elena Voss → Mara Voss → Lia Vale. The locket represents the family’s connection to Elena’s forbidden seed work.</p></div></div></>}
       {objectKey === 'window' && <><div className="window-memory"><img src={item.image} alt="Reconstructed demo view of Boston Harbor from Mara Voss's window" /><span>RECONSTRUCTED ENVIRONMENT · COLOR INTERPRETIVE</span></div><div className="object-story"><Kicker>{item.meta}</Kicker><h3>What Mara saw <em>before the warning.</em></h3><p>{item.text}</p><div className="evidence-link"><span>04:51</span><div><b>NORTH BRIDGE CONVOY</b><p>Matches recovered Gate Transit Log 17-B in Human Legacy.</p></div></div><button className="primary" onClick={() => go('reconstruction')}>FOLLOW EVIDENCE TO HUMAN LEGACY <Icon name="arrow" /></button></div></>}
     </div>
   </Modal>
-}
-
-function DemoAudioPlayer() {
-  const [playing, setPlaying] = useState(false)
-  const transcript = 'Jonas says they are weather trucks. They are not. No markings, no headlights. Seventeen, maybe eighteen, all going north.'
-  useEffect(() => () => window.speechSynthesis?.cancel(), [])
-  const toggle = () => {
-    if (playing) {
-      window.speechSynthesis?.cancel()
-      return setPlaying(false)
-    }
-    if (!('speechSynthesis' in window)) return
-    const utterance = new SpeechSynthesisUtterance(transcript)
-    utterance.rate = .82
-    utterance.pitch = .88
-    utterance.onend = () => setPlaying(false)
-    utterance.onerror = () => setPlaying(false)
-    setPlaying(true)
-    window.speechSynthesis.speak(utterance)
-  }
-  return <div className={`narrated-demo ${playing ? 'playing' : ''}`}><button onClick={toggle} aria-label={playing ? 'Stop fabricated demo transcript' : 'Play fabricated demo transcript'}><Icon name={playing ? 'pause' : 'play'} /></button><div><b>{playing ? 'PLAYING TRANSCRIPT' : 'PLAY FABRICATED DEMO TRANSCRIPT'}</b><span>Browser-generated narration · not Mara’s real voice</span></div><i /></div>
 }
 
 function MemoryRoomUnavailable({ ancestor, memories, go }: { ancestor: FamilyMember; memories: StoredMemory[]; go: (s: Screen) => void }) {
