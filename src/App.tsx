@@ -612,8 +612,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured)
   const [accountOpen, setAccountOpen] = useState(false)
   const [families, setFamilies] = useState<FamilyWithRole[]>([])
-  const [activeFamilyId, setActiveFamilyId] = useState<string | null>(null)
-  const [archiveMode, setArchiveMode] = useState<'demo' | 'private'>('demo')
+  const [activeFamilyId, setActiveFamilyId] = usePersistentState<string | null>('project-echo-active-family-id-v1', null)
+  const [archiveMode, setArchiveMode] = usePersistentState<'demo' | 'private'>('project-echo-archive-mode-v1', 'demo')
   const [privateMembers, setPrivateMembers] = useState<FamilyMember[]>([])
   const [privateMemories, setPrivateMemories] = useState<StoredMemory[]>([])
   const [archiveError, setArchiveError] = useState('')
@@ -632,11 +632,18 @@ export default function App() {
   useEffect(() => {
     if (!user) { setFamilies([]); setActiveFamilyId(null); setArchiveMode('demo'); return }
     let current = true
-    void getMyFamilies().then((items) => { if (current) setFamilies(items) }).catch((cause) => {
+    void getMyFamilies().then((items) => {
+      if (current) {
+        setFamilies(items)
+        if (items.length > 0 && archiveMode === 'private' && (!activeFamilyId || !items.some((f) => f.id === activeFamilyId))) {
+          setActiveFamilyId(items[0].id)
+        }
+      }
+    }).catch((cause) => {
       if (current) setArchiveError(cause instanceof Error ? cause.message : 'Could not load families.')
     })
     return () => { current = false }
-  }, [user, refreshVersion])
+  }, [user, refreshVersion, archiveMode, activeFamilyId])
 
   useEffect(() => {
     if (!user || archiveMode !== 'private' || !activeFamilyId) { setPrivateMembers([]); setPrivateMemories([]); return }
@@ -644,14 +651,6 @@ export default function App() {
     setArchiveError('')
     void (async () => {
       const rows = await getAncestors(activeFamilyId)
-      const positions = [{ x: 50, y: 19 }, { x: 34, y: 51 }, { x: 66, y: 51 }, { x: 50, y: 82 }]
-      const loadedMembers: FamilyMember[] = rows.map((row, index) => ({
-        id: row.id, name: row.name,
-        years: `${row.birth_year ?? '—'}—${row.death_year ?? ''}`,
-        gen: `GEN ${row.generation || index + 1}`,
-        memories: 0, biography: row.biography ?? undefined,
-        ...(positions[index] ?? { x: 18 + (index % 4) * 22, y: 20 + Math.floor(index / 4) * 28 }),
-      }))
       const memoryRows = (await Promise.all(rows.map((row) => getMemoriesForAncestor(row.id)))).flat()
       const loadedMemories = await Promise.all(memoryRows.map(async (row): Promise<StoredMemory> => {
         const assets = await getMediaWithSignedUrls(row.id)
@@ -663,6 +662,19 @@ export default function App() {
           createdAt: row.memory_date ?? row.created_at,
           tags: description.toLowerCase().split(/\W+/).filter((tag) => ['boston', 'harbor', 'evacuation', 'ocean', 'svalbard', 'surface'].includes(tag)) }
       }))
+      const positions = [{ x: 50, y: 19 }, { x: 34, y: 51 }, { x: 66, y: 51 }, { x: 50, y: 82 }]
+      const loadedMembers: FamilyMember[] = rows.map((row, index) => {
+        const primaryImage = loadedMemories.find((m) => m.personId === row.id && m.type === 'image' && m.dataUrl)?.dataUrl
+        return {
+          id: row.id, name: row.name,
+          years: `${row.birth_year ?? '—'}—${row.death_year ?? ''}`,
+          gen: `GEN ${row.generation || index + 1}`,
+          memories: memoryRows.filter((m) => m.ancestor_id === row.id).length,
+          image: primaryImage,
+          biography: row.biography ?? undefined,
+          ...(positions[index] ?? { x: 18 + (index % 4) * 22, y: 20 + Math.floor(index / 4) * 28 }),
+        }
+      })
       if (current) {
         setPrivateMembers(loadedMembers); setPrivateMemories(loadedMemories)
         if (loadedMembers.length && !loadedMembers.some((item) => item.id === selectedAncestorId)) setSelectedAncestorId(loadedMembers[0].id)

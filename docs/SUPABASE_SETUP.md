@@ -43,6 +43,26 @@ transcript, ancestor ID, memory ID, and UI-owned upload status. `uploadMemoryMed
 not persisted yet; coordinate a schema migration before adding either field rather than creating another bucket or
 embedding unreviewed transcript data in a description.
 
+## Verification status (Priority 1 Complete)
+- **Hosted project**: `nnyeoqigeerkdmwzxfdf` (Production).
+- **Migrations applied**:
+  - `20261119000000_init_schema.sql`
+  - `20261119000100_rls_policies.sql`
+  - `20261119000200_storage.sql`
+  - `20261119000300_security_hardening.sql`
+- **Security test suite**: `supabase/tests/rls_verification.sql` executed against hosted instance in an atomic transaction; passed all 20 assertions and rolled back cleanly.
+- **End-to-End verified workflow**:
+  - Authenticated user signed up through frontend.
+  - Created private family archive `Echo Test Family` (`dbb8a9f0-0cba-4dcc-95fb-563d5fb8975f`).
+  - Created ancestor `Marcus Vale` (`1f793ef1-6897-400d-851a-ca1b61e07a50`).
+  - Uploaded real photograph (`harbor-beacon-2044.png`, 289,155 bytes, PNG) to private bucket `memory-media`.
+  - Created memory `Christmas Day` (`b406ce4b-af99-4720-ab91-41b77e996ef5`) and linked `media_assets` row.
+  - Private signed URL verified for authorized user; anonymous public URL verified blocked (`NoSuchBucket`).
+  - Browser reload persistence verified.
+  - Fictional Voss/Vale demo archive preserved.
+
 ## Known limits
 - The last owner of a family can leave it; inviting members means an owner inserting a `family_memberships` row for an existing user id (no invite UI).
 - Deleting a memory/ancestor cascades DB rows but not storage objects; use `deleteMediaAsset` first.
+- Immersive 3D/interactive Memory Room is implemented specifically for Mara Voss; other ancestors preserve memories and display archival cards with signed media previews.
+- Audio transcript and duration fields from ElevenLabs contract (`AudioUploadContract`) require a dedicated schema migration before persisting directly in PostgreSQL.

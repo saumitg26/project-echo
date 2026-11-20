@@ -22,4 +22,5 @@ supabase/.temp/
 /.plugins/
 /.opencode-skills/
 .DS_Store
+work_remote_*.sql
 !.env.example
