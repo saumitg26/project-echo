@@ -9,6 +9,8 @@ vite.config.*.timestamp-*
 *-debug.log*
 logs/
 *.log
+.supabase/
+supabase/.temp/
 .claude-replay.*
 .tmp-*
 /.figma/design-context/
@@ -20,4 +22,5 @@ logs/
 /.plugins/
 /.opencode-skills/
 .DS_Store
+work_remote_*.sql
 !.env.example
