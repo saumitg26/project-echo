@@ -1,83 +1,113 @@
-PROJECT ECHO
-The world is gone. Its memories aren’t.
+<div align="center">PROJECT ECHO
+The world is gone. Its memories aren't.
+An immersive memory-preservation experience set in the last surviving cities beneath Earth's surface.
 
-An immersive memory-preservation experience set in the last surviving cities beneath Earth’s surface. Built for PatriotHacks HackFest 2026.
+Built for PatriotHacks HackFest 2026
 
 Live Demo · Source Code
-The Story
-The year is 2087. Earth’s surface has become uninhabitable, and humanity survives in an underground network known as the Hollow. Resources are rationed, records are fragmented, and the Directorate controls what information survives.
+</div>The Story
+The year is 2087. Earth's surface has become uninhabitable, and humanity survives in an underground network known as the Hollow. Resources are rationed, records are fragmented, and the Directorate controls what information survives.
 
-History also lives in photographs, family stories, and the voices of people who came before us. Project Echo asks a question: If we can preserve humanity’s survival, can we also preserve its identity?
+But history is more than official records. It lives in photographs, family stories, recordings, and the voices of people who came before us.
+
+PROJECT ECHO is an interactive archive built around one question:
+If we can preserve humanity's survival, can we also preserve its identity?
+
+Explore personal memories, piece together surviving historical evidence, and leave something meaningful for future generations.
 What You Can Do
-Experience	What to explore
-Family Legacy	Explore a family constellation, select a family member, and discover their memories. Try the built-in Voss family demo or sign in to use a private family archive backed by Supabase. Add photos, videos, audio, and other supported records.
-3D Memory Room	Step into Mara Voss’s room, built with Three.js and React Three Fiber. Explore objects from her life, open her cassette, and listen to prerecorded narration while following the transcript.
-Human Legacy / Lost Earth	Explore an interactive globe and an alternate map view. Open records from Boston Harbor, Svalbard, Kyoto, and Patagonia to inspect documents, evidence, and where each record came from.
-Memory Echoes	Compare family memories with historical records. Follow suggested connections based on shared tags into related Human Legacy locations.
-First Convoy	Investigate a missing chapter in the evacuation. Compare recovered transit records, witness accounts, and official statements to see where the timelines disagree.
-Time Capsule	Write a letter, attach supported media, or record a voice message. Choose a recipient and a future unsealing date, preview the capsule, and seal it in your browser.
+Family Legacy — Preserve the people behind the history
+- Explore a family constellation and the memories attached to its members.
+- Save personal memories, including written records and supported media.
+- Use Supabase-backed family accounts and private archives when signed in.
+- Experience the fictional Voss family archive through the built-in demo.
+3D Memory Room — Step inside a memory
+- Explore Mara Voss's immersive room, built with Three.js and React Three Fiber.
+- Interact with spatial artifacts that reveal pieces of her story.
+- Play a preserved cassette recording as part of the experience.
+Human Legacy / Lost Earth — Explore what remains
+- Navigate an interactive 3D globe and explore archival locations.
+- Discover surviving records from Boston Harbor, Svalbard, Kyoto, and Patagonia.
+- Inspect historical documents, provenance, and evidence across locations.
+- Use the alternate map experience where applicable.
+Memory Echoes — Connect personal stories to history
+- Compare family memories with historical archive records.
+- Discover connections based on shared tags and context.
+- Follow a suggested connection into the related Human Legacy location.
+Current release: Memory Echoes uses rule-based matching. Experimental Gemini-powered archival analysis is being developed separately and is not part of the production release.
 
+First Convoy — Investigate a missing chapter
+- Examine recovered evidence about an evacuation convoy.
+- Compare witness accounts, transit records, and official statements.
+- Explore the contradictions between personal testimony and the official timeline.
+Time Capsule — Leave a message for tomorrow
+- Write a letter, attach supported media, or record a voice message.
+- Choose a recipient and a simulated future unsealing date.
+- Seal a capsule in the browser-based prototype.
+Prototype limitation: Capsules are saved locally in the browser. Automated delivery to future recipients is not implemented.
 
-Audio Recording and Transcription
-Use Upload Memory → Audio → Record Now to capture a voice memory in your browser. You can listen back before saving or upload an existing audio file.
-
-The audio integration includes an optional /api/transcribe endpoint for signed-in users. It requires a configured server-side deployment and an ElevenLabs API key. Generated text can be reviewed and edited in the upload form. The current save flow stores the audio without the transcript.
 Technology Stack
 Area	Technologies
 Frontend	React 19, TypeScript, Vite 8
 Styling	Tailwind CSS 4, custom CSS
 3D experiences	Three.js, React Three Fiber, React Three Drei
-Backend	Supabase PostgreSQL, Auth, Storage, and Row Level Security
-Audio	Browser MediaRecorder, prerecorded narration, optional ElevenLabs speech-to-text
-Serverless API and hosting	Vercel Functions, Vercel
+Backend and database	Supabase (PostgreSQL, Auth, Storage, RLS)
+Audio	Browser MediaRecorder, ElevenLabs speech-to-text integration, prerecorded narration
+Serverless API	Vercel Functions
+Hosting	Vercel
 
 
 Getting Started
-Run locally
-Install Node.js and npm, then run:
+Prerequisites
+- Node.js and npm
+- A Supabase project if you want to enable authenticated private family archives
+- An ElevenLabs API key if you want to enable server-side audio transcription
+Installation
 git clone https://github.com/saumitg26/project-echo.git
 cd project-echo
 npm ci
-npm run dev
-
-Open the local URL printed by Vite. The built-in demo works without Supabase credentials.
-Enable private family archives
-Copy .env.example to .env.local and fill in your Supabase project URL and public key:
+Copy .env.example to .env.local, then configure your Supabase public credentials:
 VITE_SUPABASE_URL=YOUR_SUPABASE_PROJECT_URL
 VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+Start the development server:
+npm run dev
+Open the local URL displayed by Vite.
 
-Set up the database migrations and storage policies in supabase/ before using the private archive. See [Supabase setup](docs/SUPABASE_SETUP.md) for the project-specific instructions.
-Build and preview locally
+To build for production:
 npm run build
 npm run preview
-
-Vite serves the built frontend locally. Testing live speech-to-text also requires a server that runs /api/transcribe.
-Configure Vercel
-Add the variables needed for your deployment environment under Project Settings → Environment Variables.
+Server-side configuration
+When deploying on Vercel, configure the relevant environment variables in Project Settings → Environment Variables:
 Variable	Purpose
 VITE_SUPABASE_URL	Public Supabase project URL
-VITE_SUPABASE_PUBLISHABLE_KEY	Public Supabase publishable key or legacy anon key
-ELEVENLABS_API_KEY	Server-side key used by /api/transcribe
+VITE_SUPABASE_PUBLISHABLE_KEY	Public Supabase publishable/anon key
+ELEVENLABS_API_KEY	Server-side ElevenLabs speech-to-text integration
 
 
-Keep ELEVENLABS_API_KEY in the server environment and keep its name free of the VITE_ prefix. Keep secret API keys and Supabase service-role keys out of Git.
+Never commit secret API keys or Supabase service-role keys. The ELEVENLABS_API_KEY belongs in server-side environment variables, not a VITE_ variable. Supabase database migrations and storage policies are under supabase/ and must be configured for private-archive functionality.
 Project Structure
-Path	Contents
-src/App.tsx	Main application and experience navigation
-src/audio/	Audio recording and playback components
-src/features/memory-room/	3D Memory Room
-src/features/human-legacy/	Globe, map, and historical archive
-src/lib/supabase/	Supabase client and data helpers
-api/transcribe.ts	ElevenLabs speech-to-text endpoint
-public/	Static assets, including narration audio
-supabase/	Database migrations and access policies
-
-
+project-echo/
+├── api/                         # Vercel serverless functions
+│   └── transcribe.ts            # ElevenLabs speech-to-text endpoint
+├── public/                      # Static assets, including audio
+├── src/
+│   ├── App.tsx                  # Main application and experiences
+│   ├── audio/                    # Recording and playback components
+│   ├── features/
+│   │   ├── human-legacy/         # Interactive globe and archives
+│   │   └── memory-room/         # 3D Memory Room
+│   └── lib/supabase/            # Supabase client and data helpers
+├── supabase/                     # Database schema and RLS migrations
+├── package.json
+└── README.md
 Why We Built It
-Official records leave out details that families remember: an unfinished letter, the story behind a photograph, or an account that challenges the accepted version of events. We wanted to make preserving those details something you could experience. Project Echo brings personal storytelling, spatial exploration, and historical investigation into one archive.
-Project Status
-Project Echo is a hackathon prototype. The setting and historical records are fictional. Time Capsules are stored locally in the browser and simulate future unsealing. Automated delivery and long-term archival custody would require further development.
+PROJECT ECHO explores the idea that a civilization's history cannot be captured by official records alone. Ordinary people preserve details that institutions miss: family photographs, unfinished letters, everyday voices, and accounts that challenge the accepted version of events.
 
-Memory Echoes currently uses rule-based matching. Experimental Gemini-powered archival analysis is still in development outside the production release.
+We wanted to make memory preservation something you experience, not simply another file-storage dashboard. The result combines interactive storytelling, spatial exploration, historical investigation, and tools for preserving personal stories.
 Team
 Built by Saumit Guduguntla, Maanasa Paluparthi, and Lohith Veeramachaneni for PatriotHacks HackFest 2026.
+Project Status
+PROJECT ECHO is a hackathon prototype. Its fictional setting and archived historical materials are part of the interactive narrative. Demo content is illustrative; production-grade archival integrity, long-term custody, and future capsule delivery would require further development.
+<div align="center">The world above is gone. Our stories don't have to be.
+
+Explore PROJECT ECHO
+</div>
