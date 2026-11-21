@@ -10,6 +10,7 @@ import {
 } from './lib/supabase/api'
 import { isSupabaseConfigured, supabase } from './lib/supabase/client'
 import { HistoricalArchive } from './features/human-legacy/HistoricalArchive'
+import { MemoryEchoes } from './features/memory-echoes/MemoryEchoes'
 import { getHistoricalArchive } from './features/human-legacy/api'
 import { fallbackHistoricalLocations } from './features/human-legacy/data'
 
@@ -490,44 +491,7 @@ function MemoryRoomUnavailable({ ancestor, memories, go }: { ancestor: FamilyMem
   </section>
 }
 
-function Echoes({ go, openHumanLegacy, memories }: { go: (s: Screen) => void; openHumanLegacy: (locationSlug: string) => void; memories: StoredMemory[] }) {
-  const [selected, setSelected] = useState<string | null>(null)
-  const [archiveLocations, setArchiveLocations] = useState(fallbackHistoricalLocations)
-  const [archiveSource, setArchiveSource] = useState<'live' | 'fallback'>(isSupabaseConfigured ? 'live' : 'fallback')
-  useEffect(() => {
-    if (!isSupabaseConfigured) return
-    let current = true
-    void getHistoricalArchive().then((items) => { if (current) { setArchiveLocations(items); setArchiveSource('live') } })
-      .catch(() => { if (current) { setArchiveLocations(fallbackHistoricalLocations); setArchiveSource('fallback') } })
-    return () => { current = false }
-  }, [])
-  const suggestions = memories.flatMap((memory) => archiveLocations.map((location) => {
-    const historicalTerms = new Set([...location.tags, ...location.records.flatMap((record) => record.tags)])
-    const shared = memory.tags.filter((tag) => historicalTerms.has(tag))
-    return { memory, location, shared, score: Math.min(94, 52 + shared.length * 14) }
-  })).filter((match) => match.shared.length > 0).sort((a, b) => b.score - a.score)
-  const active = suggestions.find((suggestion) => `${suggestion.memory.id}-${suggestion.location.id}` === selected)
-  return <section className="inner-screen echoes-screen">
-    <Breadcrumbs items={[{ label: 'Memory Vault', action: () => go('vault') }, { label: 'Memory Echoes' }]} />
-    <div className="section-heading compact"><div><Kicker>DETERMINISTIC DISCOVERY FIELD · {archiveSource === 'live' ? 'DATABASE RECORDS' : 'LABELED DEMO FALLBACK'}</Kicker><h2>Memory <em>Echoes</em></h2><p>Potential links surfaced from shared dates, places, and archive tags.</p></div><div className="case-status"><span>{suggestions.length}</span> POTENTIAL LINKS</div></div>
-    <div className="echo-layout">
-      <div className="echo-list">
-        {suggestions.length ? suggestions.map((suggestion, index) => {
-          const id = `${suggestion.memory.id}-${suggestion.location.id}`
-          return <button key={id} className={selected === id ? 'active' : ''} onClick={() => setSelected(id)}>
-            <span className="echo-number">0{index + 1}</span>
-            <div><small>{family.find((p) => p.id === suggestion.memory.personId)?.name} · {suggestion.memory.type.toUpperCase()}</small><b>{suggestion.memory.title}</b><p>may connect to <em>{suggestion.location.name}</em></p><div>{suggestion.shared.map((tag) => <i key={tag}>#{tag}</i>)}</div></div>
-            <strong>{suggestion.score}%<small>MATCH</small></strong>
-          </button>
-        }) : <div className="echo-empty"><Icon name="spark" size={28} /><h3>No echoes found yet</h3><p>Upload a memory mentioning Boston, Svalbard, Patagonia, the ocean, surface, harbor, or evacuation.</p><button className="secondary" onClick={() => go('family')}>ADD A FAMILY MEMORY</button></div>}
-      </div>
-      <aside className="echo-inspector">
-        {active ? <><Kicker>POTENTIAL CONNECTION · NOT CONFIRMED</Kicker><h3>{active.memory.title}</h3><div className="echo-line"><span>{family.find((p) => p.id === active.memory.personId)?.name}</span><i /><span>{active.location.name}</span></div><p>Both records share {active.shared.map((tag) => `“${tag}”`).join(' and ')}. This rule-based match suggests where to investigate; it does not prove the records describe the same event.</p><div className="caution"><b>HOW THIS WAS MATCHED</b><p>Exact overlap of seeded tags, location names, and dates. No AI inference is presented as fact.</p></div><button className="primary wide" onClick={() => openHumanLegacy(active.location.slug)}>INVESTIGATE CONNECTION <Icon name="arrow" /></button></>
-        : <div className="locked-discovery"><span><Icon name="spark" size={26} /></span><h3>Select an echo</h3><p>Inspect why a family memory may relate to a historical record.</p></div>}
-      </aside>
-    </div>
-  </section>
-}
+
 
 const fallbackEvidence = [
   { id: 1, type: 'ORIGINAL ARCHIVE', time: '05:42', title: 'Directorate Bulletin', quote: '“Evacuation commenced at first warning. All citizens were given equal passage.”', source: 'PUBLIC TRANSMISSION 6A', tone: 'cyan' },
@@ -808,7 +772,15 @@ export default function App() {
       )
     )}
     {screen === 'earth' && <HistoricalArchive initialLocationSlug={humanTarget.locationSlug} initialRecordSlug={humanTarget.recordSlug} onNavigate={go} onTargetOpened={humanTarget.autoOpen ? () => setHumanTarget((current) => ({ ...current, autoOpen: false })) : undefined} userId={user?.id} onRequestSignIn={() => setAccountOpen(true)} />}
-    {screen === 'echoes' && <Echoes go={go} openHumanLegacy={openHumanLegacy} memories={activeMemories} />}
+    {screen === 'echoes' && (
+      <MemoryEchoes
+        go={go}
+        openHumanLegacy={openHumanLegacy}
+        memories={activeMemories}
+        familyMembers={activeMembers}
+        isPrivateArchive={isPrivate}
+      />
+    )}
     {screen === 'reconstruction' && <Reconstruction go={go} />}
     {screen === 'capsule' && <Capsule go={go} capsules={capsules} saveCapsule={(capsule) => setCapsules((current) => [capsule, ...current])} />}
     {accountOpen && <AccountPanel user={user} authLoading={authLoading} families={families} activeFamilyId={activeFamilyId} archiveMode={archiveMode} onClose={() => setAccountOpen(false)} onDemo={() => { setArchiveMode('demo'); setSelectedAncestorId(family[0].id); go('family') }} onSelectFamily={(id) => { setActiveFamilyId(id); setArchiveMode('private'); setSelectedAncestorId(''); go('family') }} onFamilyCreated={(created) => { setFamilies((current) => [...current, created]); setActiveFamilyId(created.id); setArchiveMode('private'); setSelectedAncestorId(''); setRefreshVersion((value) => value + 1); go('family') }} onAncestorCreated={() => setRefreshVersion((value) => value + 1)} />}
