@@ -1,3 +1,5 @@
+import AudioPlayer from '../../audio/AudioPlayer'
+import { MARA_KITCHEN_TRANSCRIPT } from '../../audio/demoNarration'
 import { useState, useEffect } from 'react'
 import type { ArtifactKey, MemoryRoomProps } from './types'
 import { artifactData } from './data'
@@ -445,13 +447,14 @@ function MemoryObjectModal({
                     Mara’s voice, in the <em>kitchen.</em>
                   </h3>
                   <p>{item.text}</p>
-                  <DemoAudioPlayer />
-                  <div className="transcript">
-                    <b>TRANSCRIPT · 00:31–00:46</b>
-                    <p>
-                      “Jonas says they’re weather trucks. They aren’t. No markings, no headlights. Seventeen, maybe eighteen, all going north.”
-                    </p>
-                  </div>
+                  <AudioPlayer
+                    src="/audio/mara-rain-kitchen-glass.mp3"
+                    title={item.title}
+                    ancestorName="Mara Voss"
+                    dateLabel="21 March 2058"
+                    sourceType="ai-generated-demo"
+                    transcript={MARA_KITCHEN_TRANSCRIPT}
+                  />
                 </div>
               </>
             )}
@@ -520,49 +523,6 @@ function MemoryObjectModal({
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-function DemoAudioPlayer() {
-  const [playing, setPlaying] = useState(false)
-  const transcript =
-    'Jonas says they are weather trucks. They are not. No markings, no headlights. Seventeen, maybe eighteen, all going north.'
-
-  useEffect(() => () => window.speechSynthesis?.cancel(), [])
-
-  const toggle = () => {
-    if (playing) {
-      window.speechSynthesis?.cancel()
-      return setPlaying(false)
-    }
-    if (!('speechSynthesis' in window)) return
-    const utterance = new SpeechSynthesisUtterance(transcript)
-    utterance.rate = 0.82
-    utterance.pitch = 0.88
-    utterance.onend = () => setPlaying(false)
-    utterance.onerror = () => setPlaying(false)
-    setPlaying(true)
-    window.speechSynthesis.speak(utterance)
-  }
-
-  return (
-    <div className={`narrated-demo ${playing ? 'playing' : ''}`}>
-      <button
-        onClick={toggle}
-        aria-label={
-          playing
-            ? 'Stop fabricated demo transcript'
-            : 'Play fabricated demo transcript'
-        }
-      >
-        {playing ? '⏸' : '▶'}
-      </button>
-      <div>
-        <b>{playing ? 'PLAYING TRANSCRIPT' : 'PLAY FABRICATED DEMO TRANSCRIPT'}</b>
-        <span>Browser-generated narration · not Mara’s real voice</span>
-      </div>
-      <i />
     </div>
   )
 }
