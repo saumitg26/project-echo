@@ -255,6 +255,30 @@ export function MemoryEchoes({
             </div>
           )}
 
+          {analysisResult && !analysisResult.isAIGenerated && (
+            <div
+              style={{
+                margin: '12px 14px 4px',
+                padding: '10px 14px',
+                background: 'rgba(212, 155, 86, 0.08)',
+                border: '1px solid rgba(212, 155, 86, 0.3)',
+                borderRadius: '2px',
+              }}
+            >
+              <div style={{ font: "8px 'DM Mono'", color: '#e8af6e', letterSpacing: '0.08em', fontWeight: 600 }}>
+                DIAGNOSTIC STATUS · {analysisResult.sourceLabel}
+              </div>
+              {analysisResult.errorNotice && (
+                <div style={{ fontSize: '10px', color: '#c9b7a1', marginTop: '4px', lineHeight: 1.5 }}>
+                  {analysisResult.errorNotice}
+                </div>
+              )}
+              <div style={{ fontSize: '9px', color: '#887e72', marginTop: '6px' }}>
+                Displaying deterministic tag-matched historical records below. These results are not AI-analyzed.
+              </div>
+            </div>
+          )}
+
           {analyzing ? (
             <div style={{ padding: '60px 20px', textAlign: 'center', color: '#75dce7' }}>
               <div className="retrieval-core" style={{ margin: '0 auto 16px', width: '36px', height: '36px' }}>
@@ -325,7 +349,9 @@ export function MemoryEchoes({
             <>
               <div className="kicker">
                 <span />
-                {activeConnection.isAIGenerated ? 'GEMINI GROUNDED FINDING' : 'DETERMINISTIC FALLBACK'} · NOT PROVEN FACT
+                {activeConnection.isAIGenerated
+                  ? `GEMINI ${(analysisResult?.modelUsed || '3.8-FLASH').toUpperCase()} GROUNDED FINDING`
+                  : 'DETERMINISTIC FALLBACK'} · NOT PROVEN FACT
               </div>
 
               <h3 style={{ margin: '14px 0 10px' }}>{activeConnection.historicalRecordTitle}</h3>

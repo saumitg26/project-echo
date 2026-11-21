@@ -217,7 +217,8 @@ const CANONICAL_HISTORICAL_RECORDS: HistoricalRecordItem[] = [
 ]
 
 export async function POST(request: Request): Promise<Response> {
-  const { GEMINI_API_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY } = process.env
+  const { GEMINI_API_KEY, GEMINI_MODEL, VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY } = process.env
+  const model = GEMINI_MODEL || 'gemini-3.8-flash'
 
   let body: { memoryId?: string; isDemo?: boolean }
   try {
@@ -353,7 +354,8 @@ export async function POST(request: Request): Promise<Response> {
   if (!GEMINI_API_KEY) {
     return Response.json(
       {
-        error: 'Gemini AI connection is not configured on this server.',
+        error: 'GEMINI_API_KEY is not configured in Vercel environment variables for this deployment.',
+        code: 'API_KEY_MISSING',
         isConfigured: false,
       },
       { status: 503 },
@@ -443,28 +445,65 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
     },
   }
 
-  // 5. Call Gemini API (pinned to supported gemini-2.5-flash without silent fallback)
-  const model = 'gemini-2.5-flash'
+  // 5. Call Gemini API (using verified gemini-3.8-flash default, configurable via GEMINI_MODEL)
   let rawResponseText = ''
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': GEMINI_API_KEY,
+        },
         body: JSON.stringify(geminiPayload),
         signal: AbortSignal.timeout(25_000),
       },
     )
 
     if (response.status === 429) {
-      return Response.json({ error: 'Gemini rate limit reached. Please retry shortly.' }, { status: 429 })
+      return Response.json(
+        {
+          error: 'Gemini API rate limit or quota exceeded (429). Please retry shortly.',
+          code: 'RATE_LIMIT_EXCEEDED',
+          model,
+        },
+        { status: 429 },
+      )
+    }
+
+    if (response.status === 404) {
+      return Response.json(
+        {
+          error: `Gemini model "${model}" is not available or unrecognized by Google API (404).`,
+          code: 'MODEL_UNAVAILABLE',
+          model,
+        },
+        { status: 404 },
+      )
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return Response.json(
+        {
+          error: `Gemini API key was rejected (${response.status}). Verify key permissions in Google Cloud / AI Studio.`,
+          code: 'INVALID_API_KEY',
+          model,
+        },
+        { status: response.status },
+      )
     }
 
     if (!response.ok) {
+      const errBody = await response.json().catch(() => null)
+      const detail = errBody?.error?.message ? `: ${errBody.error.message}` : ''
       return Response.json(
-        { error: `Gemini API returned status ${response.status}. Analysis could not be completed.` },
+        {
+          error: `Gemini server returned status ${response.status}${detail}`,
+          code: 'GEMINI_SERVER_ERROR',
+          model,
+        },
         { status: 502 },
       )
     }
@@ -472,14 +511,27 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
     const geminiJson = await response.json()
     const candidate = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text
     if (typeof candidate !== 'string' || !candidate.trim()) {
-      return Response.json({ error: 'Gemini returned an empty response.' }, { status: 502 })
+      return Response.json(
+        {
+          error: 'Gemini returned an empty response candidate.',
+          code: 'EMPTY_RESPONSE',
+          model,
+        },
+        { status: 502 },
+      )
     }
     rawResponseText = candidate.trim()
   } catch (cause) {
     const isTimeout = cause instanceof Error && cause.name === 'TimeoutError'
     return Response.json(
-      { error: isTimeout ? 'Gemini analysis timed out.' : 'Failed to reach Gemini API.' },
-      { status: 504 },
+      {
+        error: isTimeout
+          ? 'Gemini analysis request timed out (25s).'
+          : 'Failed to connect to Google Gemini API (network failure).',
+        code: isTimeout ? 'TIMEOUT' : 'NETWORK_FAILURE',
+        model,
+      },
+      { status: isTimeout ? 504 : 502 },
     )
   }
 

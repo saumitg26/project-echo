@@ -23,11 +23,22 @@ export interface AIEchoConnection {
   isAIGenerated: boolean
 }
 
+export type FallbackReason =
+  | 'API_KEY_MISSING'
+  | 'MODEL_UNAVAILABLE'
+  | 'INVALID_API_KEY'
+  | 'RATE_LIMIT_EXCEEDED'
+  | 'GEMINI_SERVER_ERROR'
+  | 'NETWORK_FAILURE'
+  | 'EMPTY_RESPONSE'
+  | 'PARSE_ERROR'
+
 export interface AIEchoResult {
   memoryId: string
   connections: AIEchoConnection[]
   isAIGenerated: boolean
   sourceLabel: string
   modelUsed?: string
+  fallbackReason?: FallbackReason
   errorNotice?: string
 }

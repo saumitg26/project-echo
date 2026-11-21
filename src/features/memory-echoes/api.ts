@@ -1,5 +1,5 @@
 import type { HistoricalLocation } from '../human-legacy/types'
-import type { AIEchoConnection, AIEchoResult, ConnectionCategory } from './types'
+import type { AIEchoConnection, AIEchoResult, ConnectionCategory, FallbackReason } from './types'
 
 export interface MemoryQueryInput {
   id: string
@@ -100,36 +100,69 @@ export async function discoverMemoryEchoes(
     if (response.ok) {
       const data = await response.json()
       if (Array.isArray(data?.connections)) {
+        const modelName = data.model ? String(data.model).toUpperCase() : '3.8-FLASH'
         return {
           memoryId: memory.id,
           connections: data.connections as AIEchoConnection[],
           isAIGenerated: true,
-          sourceLabel: `GEMINI ${data.model ? data.model.toUpperCase() : 'AI'} · GROUNDED ARCHIVAL ANALYSIS`,
-          modelUsed: data.model,
+          sourceLabel: `GEMINI ${modelName} · GROUNDED ARCHIVAL ANALYSIS`,
+          modelUsed: data.model || 'gemini-3.8-flash',
         }
       }
     }
 
-    // Handle 503 or 404 (Gemini not configured or endpoint unavailable)
+    // Specific error classification based on response status and error payload
     const errData = await response.json().catch(() => null)
-    const errorNotice = errData?.error || 'Gemini serverless endpoint not active. Using deterministic fallback.'
+    let fallbackReason: FallbackReason = 'GEMINI_SERVER_ERROR'
+    let sourceLabel = `RULE-BASED DETERMINISTIC FALLBACK · ERROR (${response.status})`
+    let errorNotice = errData?.error || `Server responded with status ${response.status}.`
+
+    if (response.status === 503 || errData?.code === 'API_KEY_MISSING') {
+      fallbackReason = 'API_KEY_MISSING'
+      sourceLabel = 'RULE-BASED DETERMINISTIC FALLBACK · GEMINI API KEY MISSING'
+      errorNotice = errData?.error || 'GEMINI_API_KEY is not configured in Vercel environment variables for this deployment.'
+    } else if (response.status === 404 || errData?.code === 'MODEL_UNAVAILABLE') {
+      fallbackReason = 'MODEL_UNAVAILABLE'
+      sourceLabel = `RULE-BASED DETERMINISTIC FALLBACK · MODEL UNAVAILABLE (404)`
+      errorNotice = errData?.error || `Configured model "${errData?.model || 'gemini-3.8-flash'}" was not recognized by Google API (404).`
+    } else if (response.status === 401 || response.status === 403 || errData?.code === 'INVALID_API_KEY') {
+      fallbackReason = 'INVALID_API_KEY'
+      sourceLabel = `RULE-BASED DETERMINISTIC FALLBACK · AUTH REJECTED (${response.status})`
+      errorNotice = errData?.error || `Gemini API key was rejected (${response.status}). Verify key permissions in Google Cloud / AI Studio.`
+    } else if (response.status === 429 || errData?.code === 'RATE_LIMIT_EXCEEDED') {
+      fallbackReason = 'RATE_LIMIT_EXCEEDED'
+      sourceLabel = 'RULE-BASED DETERMINISTIC FALLBACK · RATE LIMIT (429)'
+      errorNotice = errData?.error || 'Gemini API rate limit or quota exceeded (429). Please retry shortly.'
+    } else if (response.status >= 500) {
+      fallbackReason = 'GEMINI_SERVER_ERROR'
+      sourceLabel = `RULE-BASED DETERMINISTIC FALLBACK · SERVER ERROR (${response.status})`
+      errorNotice = errData?.error || `Gemini server returned status ${response.status}.`
+    }
 
     const fallbackConnections = generateDeterministicFallback(memory, archiveLocations)
     return {
       memoryId: memory.id,
       connections: fallbackConnections,
       isAIGenerated: false,
-      sourceLabel: 'RULE-BASED DETERMINISTIC FALLBACK · GEMINI NOT CONFIGURED',
+      sourceLabel,
+      modelUsed: errData?.model,
+      fallbackReason,
       errorNotice,
     }
   } catch (cause) {
+    const isTimeout = cause instanceof Error && cause.name === 'TimeoutError'
     const fallbackConnections = generateDeterministicFallback(memory, archiveLocations)
     return {
       memoryId: memory.id,
       connections: fallbackConnections,
       isAIGenerated: false,
-      sourceLabel: 'RULE-BASED DETERMINISTIC FALLBACK · OFFLINE',
-      errorNotice: cause instanceof Error ? cause.message : 'Network failure',
+      sourceLabel: isTimeout
+        ? 'RULE-BASED DETERMINISTIC FALLBACK · REQUEST TIMEOUT'
+        : 'RULE-BASED DETERMINISTIC FALLBACK · NETWORK FAILURE',
+      fallbackReason: 'NETWORK_FAILURE',
+      errorNotice: isTimeout
+        ? 'Request to /api/echoes timed out (28s). Using rule-based fallback.'
+        : cause instanceof Error ? cause.message : 'Network failure reaching /api/echoes',
     }
   }
 }
