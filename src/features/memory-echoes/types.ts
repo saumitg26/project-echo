@@ -25,6 +25,7 @@ export interface AIEchoConnection {
 
 export type FallbackReason =
   | 'API_KEY_MISSING'
+  | 'MODEL_OVERLOADED'
   | 'MODEL_UNAVAILABLE'
   | 'INVALID_API_KEY'
   | 'RATE_LIMIT_EXCEEDED'

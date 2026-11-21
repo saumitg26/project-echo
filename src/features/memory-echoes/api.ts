@@ -94,7 +94,7 @@ export async function discoverMemoryEchoes(
         memoryId: memory.id,
         isDemo,
       }),
-      signal: AbortSignal.timeout(28_000),
+      signal: AbortSignal.timeout(55_000),
     })
 
     if (response.ok) {
@@ -117,10 +117,14 @@ export async function discoverMemoryEchoes(
     let sourceLabel = `RULE-BASED DETERMINISTIC FALLBACK · ERROR (${response.status})`
     let errorNotice = errData?.error || `Server responded with status ${response.status}.`
 
-    if (response.status === 503 || errData?.code === 'API_KEY_MISSING') {
+    if (errData?.code === 'API_KEY_MISSING') {
       fallbackReason = 'API_KEY_MISSING'
       sourceLabel = 'RULE-BASED DETERMINISTIC FALLBACK · GEMINI API KEY MISSING'
       errorNotice = errData?.error || 'GEMINI_API_KEY is not configured in Vercel environment variables for this deployment.'
+    } else if (errData?.code === 'MODEL_OVERLOADED' || (response.status === 503 && !errData?.code)) {
+      fallbackReason = 'MODEL_OVERLOADED'
+      sourceLabel = 'RULE-BASED DETERMINISTIC FALLBACK · GOOGLE SERVICE OVERLOADED (503)'
+      errorNotice = errData?.error || 'Google Gemini service is temporarily overloaded (503). Please retry in a few moments.'
     } else if (response.status === 404 || errData?.code === 'MODEL_UNAVAILABLE') {
       fallbackReason = 'MODEL_UNAVAILABLE'
       sourceLabel = `RULE-BASED DETERMINISTIC FALLBACK · MODEL UNAVAILABLE (404)`
@@ -161,7 +165,7 @@ export async function discoverMemoryEchoes(
         : 'RULE-BASED DETERMINISTIC FALLBACK · NETWORK FAILURE',
       fallbackReason: 'NETWORK_FAILURE',
       errorNotice: isTimeout
-        ? 'Request to /api/echoes timed out (28s). Using rule-based fallback.'
+        ? 'Request to /api/echoes timed out (55s). Using rule-based fallback.'
         : cause instanceof Error ? cause.message : 'Network failure reaching /api/echoes',
     }
   }

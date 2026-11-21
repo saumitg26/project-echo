@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
 export const config = {
-  maxDuration: 30,
+  maxDuration: 60,
 }
+export const maxDuration = 60
 
 interface DemoMemory {
   id: string
@@ -217,6 +218,7 @@ const CANONICAL_HISTORICAL_RECORDS: HistoricalRecordItem[] = [
 ]
 
 export async function POST(request: Request): Promise<Response> {
+  const startTime = Date.now()
   const { GEMINI_API_KEY, GEMINI_MODEL, VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY } = process.env
   const model = GEMINI_MODEL || 'gemini-3.8-flash'
 
@@ -233,6 +235,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // 1. Authorize and retrieve the memory server-side
+  const memStart = Date.now()
   let targetMemory: {
     id: string
     title: string
@@ -314,8 +317,10 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ error: 'Could not verify private memory authorization.' }, { status: 503 })
     }
   }
+  const memDurationMs = Date.now() - memStart
 
   // 2. Retrieve published historical records server-side
+  const recordsStart = Date.now()
   let candidateRecords: HistoricalRecordItem[] = CANONICAL_HISTORICAL_RECORDS
   if (VITE_SUPABASE_URL && VITE_SUPABASE_PUBLISHABLE_KEY) {
     try {
@@ -349,6 +354,7 @@ export async function POST(request: Request): Promise<Response> {
       // Retain canonical fallback records if database query fails
     }
   }
+  const recordsDurationMs = Date.now() - recordsStart
 
   // 3. Verify Gemini API Key configuration
   if (!GEMINI_API_KEY) {
@@ -402,9 +408,11 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
       parts: [{ text: systemInstruction }],
     },
     generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 1500,
+      maxOutputTokens: 2048,
       responseMimeType: 'application/json',
+      thinkingConfig: {
+        thinkingLevel: 'low',
+      },
       responseSchema: {
         type: 'OBJECT',
         properties: {
@@ -446,11 +454,13 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
   }
 
   // 5. Call Gemini API (using verified gemini-3.8-flash default, configurable via GEMINI_MODEL)
+  const geminiStart = Date.now()
+  let geminiDurationMs = 0
   let rawResponseText = ''
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
         method: 'POST',
         headers: {
@@ -458,11 +468,14 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
           'x-goog-api-key': GEMINI_API_KEY,
         },
         body: JSON.stringify(geminiPayload),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(45_000),
       },
     )
 
+    geminiDurationMs = Date.now() - geminiStart
+
     if (response.status === 429) {
+      console.warn(`[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=RATE_LIMIT_EXCEEDED (429) model=${model}`)
       return Response.json(
         {
           error: 'Gemini API rate limit or quota exceeded (429). Please retry shortly.',
@@ -473,7 +486,22 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
       )
     }
 
+    if (response.status === 503) {
+      console.warn(`[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=MODEL_OVERLOADED (503) model=${model}`)
+      const errBody = await response.json().catch(() => null)
+      const detail = errBody?.error?.message ? `: ${errBody.error.message}` : ''
+      return Response.json(
+        {
+          error: `Google Gemini service is temporarily overloaded (503)${detail}. Please retry in a few moments.`,
+          code: 'MODEL_OVERLOADED',
+          model,
+        },
+        { status: 503 },
+      )
+    }
+
     if (response.status === 404) {
+      console.warn(`[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=MODEL_UNAVAILABLE (404) model=${model}`)
       return Response.json(
         {
           error: `Gemini model "${model}" is not available or unrecognized by Google API (404).`,
@@ -485,6 +513,7 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
     }
 
     if (response.status === 401 || response.status === 403) {
+      console.warn(`[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=INVALID_API_KEY (${response.status}) model=${model}`)
       return Response.json(
         {
           error: `Gemini API key was rejected (${response.status}). Verify key permissions in Google Cloud / AI Studio.`,
@@ -496,6 +525,7 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
     }
 
     if (!response.ok) {
+      console.warn(`[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=SERVER_ERROR (${response.status}) model=${model}`)
       const errBody = await response.json().catch(() => null)
       const detail = errBody?.error?.message ? `: ${errBody.error.message}` : ''
       return Response.json(
@@ -511,6 +541,7 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
     const geminiJson = await response.json()
     const candidate = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text
     if (typeof candidate !== 'string' || !candidate.trim()) {
+      console.warn(`[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=EMPTY_RESPONSE model=${model}`)
       return Response.json(
         {
           error: 'Gemini returned an empty response candidate.',
@@ -522,11 +553,15 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
     }
     rawResponseText = candidate.trim()
   } catch (cause) {
+    geminiDurationMs = Date.now() - geminiStart
     const isTimeout = cause instanceof Error && cause.name === 'TimeoutError'
+    console.warn(
+      `[Echoes Timing] gemini_failed=${geminiDurationMs}ms error=${isTimeout ? 'TIMEOUT' : 'NETWORK_FAILURE'} model=${model}`,
+    )
     return Response.json(
       {
         error: isTimeout
-          ? 'Gemini analysis request timed out (25s).'
+          ? 'Gemini analysis request timed out (45s).'
           : 'Failed to connect to Google Gemini API (network failure).',
         code: isTimeout ? 'TIMEOUT' : 'NETWORK_FAILURE',
         model,
@@ -536,6 +571,7 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
   }
 
   // 6. Parse and strictly validate every returned record ID and quote
+  const valStart = Date.now()
   interface RawConnection {
     historicalRecordId: string
     connectionCategory: string
@@ -609,6 +645,13 @@ Find up to 3 historical records that have a plausible, evidence-based relationsh
 
     if (validatedConnections.length >= 3) break
   }
+
+  const valDurationMs = Date.now() - valStart
+  const totalDurationMs = Date.now() - startTime
+
+  console.log(
+    `[Echoes Timing] memory=${memDurationMs}ms records=${recordsDurationMs}ms gemini=${geminiDurationMs}ms validation=${valDurationMs}ms total=${totalDurationMs}ms model=${model}`,
+  )
 
   return Response.json({
     status: 'success',
